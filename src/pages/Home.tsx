@@ -13,9 +13,9 @@ export default function Home() {
 
       <header className="px-6 py-6 md:px-10">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <h1 className="text-2xl font-bold tracking-tight">
-            Support<span className="text-secondary">IQ</span>
-          </h1>
+          <Link to="/" aria-label="SmartIQ Home" className="text-2xl font-bold tracking-tight">
+            Smart<span className="text-secondary">IQ</span>
+          </Link>
           <Link to="/login" className="btn-secondary py-2 px-4 text-sm">
             Admin Login
           </Link>

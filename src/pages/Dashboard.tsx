@@ -103,6 +103,7 @@ export default function Dashboard() {
   const [isSending, setIsSending] = useState(false);
   const [aiDraft, setAiDraft] = useState('');
   const [status, setStatus] = useState<'idle' | 'sending' | 'sent'>('idle');
+  const [modalError, setModalError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const navigate = useNavigate();
@@ -169,9 +170,10 @@ export default function Dashboard() {
 
   const handleGenerateResponse = async () => {
     if (!selectedMessage) return;
+    setModalError('');
 
     if (!n8nWebhookUrl) {
-      setLoadError('Missing VITE_N8N_WEBHOOK_URL in your environment config.');
+      setModalError('Missing VITE_N8N_WEBHOOK_URL in your environment config.');
       return;
     }
 
@@ -238,7 +240,7 @@ export default function Dashboard() {
       await loadMessages();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to generate AI response.';
-      setLoadError(message);
+      setModalError(message);
     } finally {
       setIsGenerating(false);
     }
@@ -246,8 +248,9 @@ export default function Dashboard() {
 
   const handleSendResponse = async () => {
     if (!selectedMessage || !aiDraft || !currentUser) return;
+    setModalError('');
     if (!emailJsServiceId || !emailJsTemplateId || !emailJsPublicKey) {
-      setLoadError('Missing EmailJS environment variables.');
+      setModalError('Missing EmailJS environment variables.');
       return;
     }
 
@@ -284,7 +287,7 @@ export default function Dashboard() {
       if (error) {
         setIsSending(false);
         setStatus('idle');
-        setLoadError(error.message || 'Unable to send response.');
+        setModalError(error.message || 'Unable to send response.');
         return;
       }
 
@@ -295,11 +298,28 @@ export default function Dashboard() {
         setStatus('idle');
         setAiDraft('');
         setSelectedMessage(null);
+        setModalError('');
         setIsSending(false);
       }, 1200);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unable to send email response.';
-      setLoadError(message);
+      let message = 'Unable to send email response.';
+      if (error instanceof Error && error.message) {
+        message = error.message;
+      } else if (error && typeof error === 'object') {
+        const knownError = error as { status?: number; text?: string; message?: string };
+        if (knownError.text) {
+          message = knownError.status ? `EmailJS ${knownError.status}: ${knownError.text}` : knownError.text;
+        } else if (knownError.message) {
+          message = knownError.message;
+        } else {
+          try {
+            message = JSON.stringify(error);
+          } catch {
+            message = 'Unable to send email response.';
+          }
+        }
+      }
+      setModalError(message);
       setIsSending(false);
       setStatus('idle');
     }
@@ -534,6 +554,11 @@ export default function Dashboard() {
                           <><Send className="w-4 h-4" /> Send Response</>}
                     </button>
                   </div>
+                  {modalError && (
+                    <p className="mt-3 text-xs text-error bg-error/10 border border-error/20 rounded-lg px-3 py-2">
+                      {modalError}
+                    </p>
+                  )}
                 </div>
               </div>
             </motion.div>

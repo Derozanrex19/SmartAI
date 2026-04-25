@@ -1,0 +1,2 @@
+# SmartAI
+MagentIQ project

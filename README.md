@@ -1,22 +1,61 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# SmartAI (SupportIQ)
+MagentIQ technical demo project.
 
-# SmartAI
-MagentIQ Project
+## Stack
+- Frontend: React + Vite + Tailwind
+- DB/Auth: Supabase
+- AI Workflow: n8n webhook -> Gemini
+- Hosting: Vercel
 
-## Run and deploy your AI Studio app
-
-This contains everything you need to run your app locally.
-
-View your app in AI Studio: https://ai.studio/apps/313653d3-aec0-4385-9400-eb61a5d2e218
-
-## Run Locally
-
-**Prerequisites:** Node.js
-
+## Local Run
 1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in `.env.local` to your Gemini API key
-3. Run the app:
-   `npm run dev`
+   - `npm install`
+2. Create `.env.local` and set:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+   - `VITE_N8N_WEBHOOK_URL`
+3. Start dev server:
+   - `npm run dev`
+
+## Required Environment Variables
+For local and Vercel:
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+- `VITE_N8N_WEBHOOK_URL`
+
+## Vercel Deployment
+1. Import this GitHub repo into Vercel.
+2. Framework preset:
+   - Vite (auto-detected)
+3. Build settings:
+   - Build command: `npm run build`
+   - Output directory: `dist`
+4. Add environment variables (Production + Preview):
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+   - `VITE_N8N_WEBHOOK_URL`
+5. Deploy.
+
+## SPA Routing (Important)
+This repo includes `vercel.json` with rewrite to `index.html` so `/login` and `/dashboard` work on refresh.
+
+## Supabase Auth URL Configuration
+In Supabase dashboard -> Authentication -> URL Configuration:
+1. Site URL:
+   - `https://<your-vercel-domain>`
+2. Redirect URLs:
+   - `https://<your-vercel-domain>/**`
+   - `http://localhost:3000/**` (for local dev)
+
+## n8n Requirements
+1. Workflow must be `Published/Active`.
+2. App must use production webhook URL:
+   - `https://<your-subdomain>.app.n8n.cloud/webhook/supportiq-analyze`
+3. Use test URL only when manually testing workflow editor.
+
+## Production Smoke Test
+1. Submit customer ticket on `/`.
+2. Login as seeded Supabase admin.
+3. Open ticket in dashboard.
+4. Click `RE-GENERATE` and confirm AI fields populate.
+5. Click `Send Response` and confirm message status updates in Supabase.

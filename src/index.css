@@ -1,0 +1,66 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  
+  --color-primary: #7C3AED;
+  --color-secondary: #EC4899;
+  --color-bg-dark: #0F172A;
+  --color-bg-card: #1E293B;
+  --color-text-light: #F1F5F9;
+  --color-text-muted: #94A3B8;
+  --color-border: #334155;
+  --color-success: #10B981;
+  --color-error: #EF4444;
+}
+
+@layer base {
+  body {
+    @apply bg-bg-dark text-text-light font-sans antialiased;
+    scroll-behavior: smooth;
+  }
+
+  input, textarea, select {
+    @apply bg-bg-card border border-border rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-primary transition-all text-sm;
+  }
+
+  button {
+    @apply transition-all duration-200 cursor-pointer;
+  }
+
+  h1, h2, h3, h4 {
+    @apply tracking-tight;
+  }
+}
+
+.glass-morphism {
+  @apply bg-bg-card/50 backdrop-blur-md border border-border transition-all;
+}
+
+.btn-primary {
+  @apply bg-gradient-to-r from-primary to-secondary hover:brightness-110 text-white font-semibold py-3 px-6 rounded-lg shadow-xl shadow-primary/20 transition-all active:scale-95;
+}
+
+.btn-secondary {
+  @apply border border-border text-text-light hover:bg-border font-medium py-3 px-6 rounded-lg transition-all;
+}
+
+.badge {
+  @apply text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider;
+}
+
+.card-hover {
+  @apply hover:bg-bg-card border border-border hover:border-primary/50 transition-all cursor-pointer;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-bg-dark;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-border rounded-full hover:bg-text-muted/30;
+}

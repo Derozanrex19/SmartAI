@@ -1,0 +1,71 @@
+import { motion } from 'motion/react';
+import { Calendar, Mail, User } from 'lucide-react';
+import type { FC } from 'react';
+
+interface Message {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  category: string;
+  message: string;
+  priority: string;
+  timestamp: string;
+}
+
+interface MessageCardProps {
+  message: Message;
+  onClick: (message: Message) => void;
+}
+
+const MessageCard: FC<MessageCardProps> = ({ message, onClick }) => {
+  const date = new Date(message.timestamp).toLocaleDateString();
+  
+  return (
+    <motion.div 
+      whileHover={{ y: -4, scale: 1.01 }}
+      onClick={() => onClick(message)}
+      className="glass-morphism p-5 rounded-xl cursor-pointer hover:border-primary/40 transition-all group"
+    >
+      <div className="flex justify-between items-start mb-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">
+            {message.firstName[0]}{message.lastName[0]}
+          </div>
+          <div>
+            <h4 className="font-semibold group-hover:text-primary transition-colors">
+              {message.firstName} {message.lastName}
+            </h4>
+            <div className="flex items-center gap-1 text-xs text-text-muted">
+              <Mail className="w-3 h-3" />
+              {message.email}
+            </div>
+          </div>
+        </div>
+        <span className={`badge ${
+          message.priority === 'High' ? 'bg-error/20 text-error' :
+          message.priority === 'Medium' ? 'bg-amber-500/20 text-amber-500' :
+          'bg-success/20 text-success'
+        }`}>
+          {message.priority}
+        </span>
+      </div>
+
+      <p className="text-sm text-text-muted line-clamp-2 mb-4 leading-relaxed">
+        {message.message}
+      </p>
+
+      <div className="flex justify-between items-center pt-4 border-t border-border mt-auto">
+        <span className="badge bg-primary/10 text-primary">
+          {message.category}
+        </span>
+        <div className="flex items-center gap-1 text-xs text-text-muted">
+          <Calendar className="w-3 h-3" />
+          {date}
+        </div>
+      </div>
+    </motion.div>
+  );
+};
+
+export default MessageCard;

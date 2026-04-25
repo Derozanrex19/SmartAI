@@ -1,0 +1,127 @@
+{
+  "name": "SupportIQ",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "supportiq-analyze",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "a1a04b5b-2a1a-4071-8f86-4ed69fb4be28",
+      "name": "Webhook",
+      "webhookId": "f7610df4-752e-40a9-a24d-6a7f5d04ea6d"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {}
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"contents\": [\n    {\n      \"parts\": [\n        {\n          \"text\": \"You are SupportIQ-Triage, a strict customer-support triage model.\\n\\nYour task:\\nAnalyze one support ticket and return ONLY valid JSON with this exact schema:\\n{\\n  \\\"sentiment\\\": \\\"frustrated\\\" | \\\"neutral\\\" | \\\"happy\\\",\\n  \\\"category\\\": \\\"technical\\\" | \\\"billing\\\" | \\\"feedback\\\" | \\\"other\\\",\\n  \\\"confidence\\\": <integer 0-100>,\\n  \\\"draft_response\\\": \\\"<professional customer reply>\\\"\\n}\\n\\nHard rules:\\n1) Output JSON only. No markdown. No explanation.\\n2) Use only the allowed enum values exactly as written (lowercase).\\n3) confidence must be an integer from 0 to 100.\\n4) If uncertain, choose the closest category and lower confidence.\\n5) Priority is NOT requested here. Do not output priority.\\n6) draft_response must be concise, empathetic, and action-oriented.\\n7) Never promise refunds, credits, or timelines unless explicitly stated in the ticket.\\n8) Keep draft_response under 120 words.\\n9) If message is unclear, ask one clarifying question in draft_response.\\n\\nClassification guide:\\n- technical: bugs, crashes, login errors, upload failures, app not working, performance issues, integrations\\n- billing: charges, refunds, invoices, subscriptions, payment methods, pricing disputes\\n- feedback: praise, suggestions, product ideas, general comments not requiring troubleshooting\\n- other: anything that does not fit above categories\\n\\nSentiment guide:\\n- frustrated: angry, urgent, negative tone, repeated failure, complaint language\\n- neutral: factual, calm, informational\\n- happy: positive appreciation, praise, satisfaction\\n\\nTicket input:\\nfirstName: {{$json.body.firstName}}\\nlastName: {{$json.body.lastName}}\\nemail: {{$json.body.email}}\\npriority: {{$json.body.priority}}\\nmessage: {{$json.body.message}}\\n\\nNow return only the JSON object.\"\n        }\n      ]\n    }\n  ],\n  \"generationConfig\": {\n    \"temperature\": 0.2,\n    \"topP\": 0.9,\n    \"responseMimeType\": \"application/json\"\n  }\n}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        208,
+        0
+      ],
+      "id": "c8ed298b-493d-4fbf-9036-7601847fd939",
+      "name": "HTTP Request",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "BPnLvJCyQOsPEihx",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "let raw = $json.candidates?.[0]?.content?.parts?.[0]?.text ?? \"{}\";\n\n// Remove markdown code fences if model returns ```json ... ```\nraw = raw.replace(/^```json\\s*/i, \"\").replace(/^```\\s*/i, \"\").replace(/\\s*```$/i, \"\").trim();\n\nlet parsed;\ntry {\n  parsed = JSON.parse(raw);\n} catch {\n  parsed = {\n    sentiment: \"neutral\",\n    category: \"other\",\n    confidence: 0,\n    draft_response: \"Thank you for contacting SupportIQ. Our team will follow up shortly.\"\n  };\n}\n\nreturn [\n  {\n    json: {\n      sentiment: parsed.sentiment ?? \"neutral\",\n      category: parsed.category ?? \"other\",\n      confidence: Number(parsed.confidence ?? 0),\n      draft_response: parsed.draft_response ?? \"\",\n      raw_model_output: raw\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        0
+      ],
+      "id": "23792f7e-529d-4b44-b9d7-31ff71ef5ea7",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        624,
+        0
+      ],
+      "id": "81536771-7e8d-4e17-853f-01571bfc9ed8",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "b01b2efe-15ae-4971-afa8-c5696d2b6a99",
+  "meta": {
+    "instanceId": "73307eb5d8a8d1338ec1c03c9cad3a9c94ea07b0f0a751e368083f586fc7e42d"
+  },
+  "id": "xTWrWlBsWTE5eoAy",
+  "tags": []
+}

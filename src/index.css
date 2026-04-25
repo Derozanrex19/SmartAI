@@ -54,6 +54,165 @@
   @apply hover:bg-bg-card border border-border hover:border-primary/50 transition-all cursor-pointer;
 }
 
+/* Cube CTA button (adapted from Uiverse style, scoped for this project) */
+.cube-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem 1.15rem;
+  background: transparent;
+  outline: none;
+  border: 0;
+  color: #f5f4ff;
+  letter-spacing: 0.03em;
+  font-size: 0.97rem;
+  font-weight: 700;
+  cursor: pointer;
+  position: relative;
+  min-width: 140px;
+}
+
+.cube-btn.cube-hover {
+  position: relative;
+  transition: all 0.5s;
+}
+
+.cube-btn .cube-bg-top {
+  position: absolute;
+  height: 10px;
+  background: linear-gradient(90deg, #7c3aed, #ec4899);
+  bottom: 100%;
+  left: 5px;
+  right: -5px;
+  transform: skew(-45deg, 0);
+  margin: 0;
+  transition: all 0.4s;
+}
+
+.cube-btn .cube-bg-top .cube-bg-inner {
+  bottom: 0;
+}
+
+.cube-btn .cube-bg {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  top: 0;
+  right: 0;
+  background: linear-gradient(90deg, #7c3aed, #ec4899);
+  transition: all 0.4s;
+}
+
+.cube-btn .cube-bg-right {
+  position: absolute;
+  background: linear-gradient(180deg, #7c3aed, #ec4899);
+  top: -5px;
+  z-index: 0;
+  bottom: 5px;
+  width: 10px;
+  left: 100%;
+  transform: skew(0, -45deg);
+  transition: all 0.4s;
+}
+
+.cube-btn .cube-bg-right .cube-bg-inner {
+  left: 0;
+}
+
+.cube-btn .cube-bg-inner {
+  background: #0f172a;
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  top: 2px;
+  bottom: 2px;
+}
+
+.cube-btn .cube-text {
+  position: relative;
+  transition: all 0.4s;
+}
+
+.cube-btn:hover .cube-bg-inner {
+  background: linear-gradient(90deg, #7c3aed, #ec4899);
+  transition: all 0.4s;
+}
+
+.cube-btn:hover .cube-text {
+  color: #ffffff;
+  transition: all 0.4s;
+}
+
+.cube-btn:hover .cube-bg-right,
+.cube-btn:hover .cube-bg,
+.cube-btn:hover .cube-bg-top {
+  background: #111827;
+}
+
+.cube-btn:active {
+  z-index: 20;
+  animation: cube-bounce 0.1s linear;
+}
+
+@keyframes cube-bounce {
+  50% {
+    transform: scale(0.94);
+  }
+}
+
+/* AI Generate button (adapted from Uiverse style, scoped for dashboard) */
+.ai-generate-btn {
+  border: none;
+  min-width: 150px;
+  height: 42px;
+  border-radius: 999px;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  background: #1c1a1c;
+  cursor: pointer;
+  transition: all 450ms ease-in-out;
+  padding: 0 16px;
+}
+
+.ai-generate-sparkle {
+  fill: #aaa;
+  transition: all 800ms ease;
+}
+
+.ai-generate-text {
+  font-weight: 700;
+  color: #aaa;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.ai-generate-btn:hover:not(:disabled) {
+  background: linear-gradient(0deg, #a47cf3, #683fea);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.4),
+    inset 0 -4px 0 0 rgba(0, 0, 0, 0.2),
+    0 0 0 4px rgba(255, 255, 255, 0.12),
+    0 0 90px 0 rgba(153, 23, 255, 0.5);
+  transform: translateY(-2px);
+}
+
+.ai-generate-btn:hover:not(:disabled) .ai-generate-text {
+  color: white;
+}
+
+.ai-generate-btn:hover:not(:disabled) .ai-generate-sparkle {
+  fill: white;
+  transform: scale(1.15);
+}
+
+.ai-generate-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

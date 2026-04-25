@@ -5,6 +5,8 @@ import type { JSX } from 'react';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
+import ContactUs from './pages/ContactUs';
+import AboutUs from './pages/AboutUs';
 import { supabase } from './lib/supabase';
 
 function ProtectedRoute({ session, children }: { session: Session | null; children: JSX.Element }) {
@@ -53,6 +55,8 @@ export default function App() {
     <Router>
       <Routes>
         <Route path="/" element={<Home />} />
+        <Route path="/contact-us" element={<ContactUs />} />
+        <Route path="/about-us" element={<AboutUs />} />
         <Route path="/login" element={session ? <Navigate to="/dashboard" replace /> : <Login />} />
         <Route
           path="/dashboard"

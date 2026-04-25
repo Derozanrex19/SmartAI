@@ -1,5 +1,5 @@
 import { motion } from 'motion/react';
-import { Calendar, Mail, User } from 'lucide-react';
+import { Calendar, CheckCircle2, Mail } from 'lucide-react';
 import type { FC } from 'react';
 
 interface Message {
@@ -11,6 +11,8 @@ interface Message {
   message: string;
   priority: string;
   timestamp: string;
+  replied?: boolean;
+  respondedAt?: string | null;
 }
 
 interface MessageCardProps {
@@ -20,6 +22,7 @@ interface MessageCardProps {
 
 const MessageCard: FC<MessageCardProps> = ({ message, onClick }) => {
   const date = new Date(message.timestamp).toLocaleDateString();
+  const repliedDate = message.respondedAt ? new Date(message.respondedAt).toLocaleDateString() : null;
   
   return (
     <motion.div 
@@ -43,11 +46,13 @@ const MessageCard: FC<MessageCardProps> = ({ message, onClick }) => {
           </div>
         </div>
         <span className={`badge ${
-          message.priority === 'High' ? 'bg-error/20 text-error' :
-          message.priority === 'Medium' ? 'bg-amber-500/20 text-amber-500' :
-          'bg-success/20 text-success'
+          message.replied ? 'bg-success/20 text-success' :
+            message.priority === 'High' ? 'bg-error/20 text-error' :
+              message.priority === 'Medium' ? 'bg-amber-500/20 text-amber-500' :
+                message.priority === 'Low' ? 'bg-success/20 text-success' :
+                  'bg-border/40 text-text-muted'
         }`}>
-          {message.priority}
+          {message.replied ? 'Replied' : (message.priority === 'Pending' ? 'Pending AI' : message.priority)}
         </span>
       </div>
 
@@ -56,12 +61,19 @@ const MessageCard: FC<MessageCardProps> = ({ message, onClick }) => {
       </p>
 
       <div className="flex justify-between items-center pt-4 border-t border-border mt-auto">
-        <span className="badge bg-primary/10 text-primary">
-          {message.category}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="badge bg-primary/10 text-primary">
+            {message.category}
+          </span>
+          {message.replied && (
+            <span className="badge bg-success/10 text-success flex items-center gap-1">
+              <CheckCircle2 className="w-3 h-3" /> Sent
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-1 text-xs text-text-muted">
           <Calendar className="w-3 h-3" />
-          {date}
+          {message.replied && repliedDate ? repliedDate : date}
         </div>
       </div>
     </motion.div>

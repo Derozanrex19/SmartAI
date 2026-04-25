@@ -1,68 +1,129 @@
-import { useState } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import ContactForm from '../components/ContactForm';
+import { motion } from 'motion/react';
+import { Link } from 'react-router-dom';
+import Silk from '../components/Silk';
+import SplitText from '../components/SplitText';
 
 export default function Home() {
-  const [showForm, setShowForm] = useState(false);
-
-  const handleFormSubmit = (data: any) => {
-    console.log('Form Submission Recieved:', JSON.stringify(data, null, 2));
-  };
-
   return (
-    <div className="min-h-screen pb-20">
-      {/* Hero Section */}
-      <section className="pt-32 pb-24 px-6 relative overflow-hidden">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-[600px] bg-gradient-to-b from-primary/5 via-primary/2 to-transparent pointer-events-none" />
-        
-        <div className="max-w-5xl mx-auto text-center relative z-10">
+    <div className="min-h-screen flex flex-col relative overflow-hidden">
+      <div className="absolute inset-0 -z-10 pointer-events-none opacity-80">
+        <Silk speed={5} scale={1} color="#7B7481" noiseIntensity={1.5} rotation={0} />
+      </div>
+      <div className="absolute inset-0 -z-10 bg-gradient-to-b from-bg-dark/35 via-bg-dark/80 to-bg-dark" />
+
+      <header className="px-6 py-6 md:px-10">
+        <div className="max-w-6xl mx-auto flex items-center justify-between">
+          <h1 className="text-2xl font-bold tracking-tight">
+            Support<span className="text-secondary">IQ</span>
+          </h1>
+          <Link to="/login" className="btn-secondary py-2 px-4 text-sm">
+            Admin Login
+          </Link>
+        </div>
+      </header>
+
+      <main className="flex-1 px-6 pb-16 md:px-10">
+        <div className="max-w-6xl mx-auto grid lg:grid-cols-2 gap-10 items-center min-h-[72vh]">
           <motion.div
-            initial={{ opacity: 0, y: 30 }}
+            initial={{ opacity: 0, y: 24 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, ease: "easeOut" }}
+            transition={{ duration: 0.7, ease: 'easeOut' }}
+            className="space-y-7"
           >
-            <h1 className="text-7xl md:text-9xl font-bold mb-12 tracking-tighter bg-gradient-to-r from-primary via-secondary to-primary bg-clip-text text-transparent animate-gradient-x leading-none">
-              SupportIQ
-            </h1>
-            
-            <div className="flex flex-wrap justify-center gap-6">
-              <button 
-                onClick={() => setShowForm(!showForm)}
-                className="btn-primary text-base px-10"
-              >
-                {showForm ? 'Close Form' : 'Contact Us'}
-              </button>
-              <button className="btn-secondary text-base px-10">
-                View Solutions
-              </button>
+            <p className="text-xs uppercase tracking-[0.24em] text-text-muted font-semibold">AI Customer Support Portal</p>
+            <div className="text-5xl md:text-7xl font-bold leading-[1.03] tracking-tight">
+              <SplitText
+                text="Faster Replies."
+                className="block"
+                delay={35}
+                duration={0.8}
+                ease="easeOut"
+                splitType="chars"
+                from={{ opacity: 0, y: 36 }}
+                to={{ opacity: 1, y: 0 }}
+                threshold={0.15}
+                rootMargin="-80px"
+                textAlign="left"
+                tag="h2"
+              />
+              <SplitText
+                text="Smarter Triage."
+                className="block"
+                itemClassName="bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent"
+                delay={35}
+                duration={0.8}
+                ease="easeOut"
+                splitType="chars"
+                from={{ opacity: 0, y: 36 }}
+                to={{ opacity: 1, y: 0 }}
+                threshold={0.15}
+                rootMargin="-80px"
+                textAlign="left"
+                tag="h2"
+              />
+            </div>
+            <p className="max-w-xl text-text-muted text-base md:text-lg leading-relaxed">
+              SupportIQ helps teams handle customer concerns with AI-assisted sentiment analysis, category detection, and draft responses in one streamlined workspace.
+            </p>
+            <div className="flex flex-wrap gap-4">
+              <Link to="/contact-us" className="cube-btn cube-hover" aria-label="Contact Us">
+                <div className="cube-bg-top">
+                  <div className="cube-bg-inner" />
+                </div>
+                <div className="cube-bg-right">
+                  <div className="cube-bg-inner" />
+                </div>
+                <div className="cube-bg">
+                  <div className="cube-bg-inner" />
+                </div>
+                <div className="cube-text">Contact Us</div>
+              </Link>
+              <Link to="/about-us" className="cube-btn cube-hover" aria-label="About Us">
+                <div className="cube-bg-top">
+                  <div className="cube-bg-inner" />
+                </div>
+                <div className="cube-bg-right">
+                  <div className="cube-bg-inner" />
+                </div>
+                <div className="cube-bg">
+                  <div className="cube-bg-inner" />
+                </div>
+                <div className="cube-text">About Us</div>
+              </Link>
             </div>
           </motion.div>
-        </div>
-      </section>
 
-      {/* Form Section */}
-      <AnimatePresence>
-        {showForm && (
-          <motion.section 
-            id="contact" 
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="px-6 py-16 scroll-mt-20 overflow-hidden"
+          <motion.section
+            id="highlights"
+            initial={{ opacity: 0, y: 24 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.7, delay: 0.08, ease: 'easeOut' }}
+            className="glass-morphism rounded-2xl p-6 md:p-8"
           >
-            <motion.div
-              initial={{ y: 20 }}
-              animate={{ y: 0 }}
-              transition={{ duration: 0.5 }}
-            >
-              <ContactForm onSubmit={handleFormSubmit} />
-            </motion.div>
+            <h3 className="text-xl font-bold mb-6">Why Teams Use SupportIQ</h3>
+            <div className="grid sm:grid-cols-2 gap-4">
+              <article className="bg-bg-dark/60 border border-border rounded-xl p-4">
+                <p className="text-sm font-semibold mb-2">AI Triage</p>
+                <p className="text-xs text-text-muted leading-relaxed">Classifies issues by category and sentiment so teams prioritize the right tickets first.</p>
+              </article>
+              <article className="bg-bg-dark/60 border border-border rounded-xl p-4">
+                <p className="text-sm font-semibold mb-2">Draft Responses</p>
+                <p className="text-xs text-text-muted leading-relaxed">Creates context-aware reply drafts that agents can review and send quickly.</p>
+              </article>
+              <article className="bg-bg-dark/60 border border-border rounded-xl p-4">
+                <p className="text-sm font-semibold mb-2">Admin Dashboard</p>
+                <p className="text-xs text-text-muted leading-relaxed">Centralized inbox for ticket details, confidence scores, and live decision support.</p>
+              </article>
+              <article className="bg-bg-dark/60 border border-border rounded-xl p-4">
+                <p className="text-sm font-semibold mb-2">Built For Demo-Ready Ops</p>
+                <p className="text-xs text-text-muted leading-relaxed">Simple customer intake flow plus structured handling for high-trust responses.</p>
+              </article>
+            </div>
           </motion.section>
-        )}
-      </AnimatePresence>
+        </div>
+      </main>
 
-      {/* Footer Minimalist */}
-      <footer className="mt-20 py-8 border-t border-border text-center text-text-muted text-sm">
+      <footer className="py-6 border-t border-border text-center text-text-muted text-sm">
         <p>&copy; {new Date().getFullYear()} SupportIQ. All rights reserved.</p>
       </footer>
     </div>

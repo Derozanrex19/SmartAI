@@ -1,7 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
-import { Search, Filter, X, Sparkles, Send, Loader2, MessageSquare, Mail, Clock } from 'lucide-react';
+import {
+  Search,
+  Sparkles,
+  Send,
+  Loader2,
+  MessageSquare,
+  Mail,
+  Clock,
+  CheckCircle2,
+  AlertCircle
+} from 'lucide-react';
 import type { User } from '@supabase/supabase-js';
 import emailjs from '@emailjs/browser';
 import MessageCard from '../components/MessageCard';
@@ -16,9 +26,12 @@ interface DbMessage {
   category: string;
   message: string;
   priority: string;
+  status: string | null;
   created_at: string;
+  responded_at: string | null;
   ai_sentiment: string | null;
   ai_category: string | null;
+  ai_priority: string | null;
   ai_confidence: number | null;
   ai_draft: string | null;
   final_response: string | null;
@@ -34,6 +47,8 @@ interface UiMessage {
   message: string;
   priority: string;
   timestamp: string;
+  respondedAt: string | null;
+  replied: boolean;
   sentiment: string | null;
   aiCategory: string | null;
   confidence: number | null;
@@ -44,19 +59,18 @@ interface UiMessage {
 interface AiWebhookResponse {
   sentiment?: string;
   category?: string;
+  priority?: string;
   confidence?: number;
   draft_response?: string;
 }
 
 const VALID_CATEGORIES = ['technical', 'billing', 'feedback', 'other'] as const;
 const VALID_SENTIMENTS = ['frustrated', 'neutral', 'happy'] as const;
+const VALID_PRIORITIES = ['low', 'medium', 'high'] as const;
 
 function normalizeCategory(value: string | undefined, fallbackMessage: string): string {
   const raw = (value || '').trim().toLowerCase();
-  if ((VALID_CATEGORIES as readonly string[]).includes(raw)) {
-    return raw;
-  }
-
+  if ((VALID_CATEGORIES as readonly string[]).includes(raw)) return raw;
   const message = fallbackMessage.toLowerCase();
   if (/(charge|refund|invoice|payment|billing|subscription|price|credit card)/.test(message)) return 'billing';
   if (/(bug|error|crash|upload|login|technical|issue|fail|broken|not working)/.test(message)) return 'technical';
@@ -66,10 +80,7 @@ function normalizeCategory(value: string | undefined, fallbackMessage: string): 
 
 function normalizeSentiment(value: string | undefined, fallbackMessage: string): string {
   const raw = (value || '').trim().toLowerCase();
-  if ((VALID_SENTIMENTS as readonly string[]).includes(raw)) {
-    return raw;
-  }
-
+  if ((VALID_SENTIMENTS as readonly string[]).includes(raw)) return raw;
   const message = fallbackMessage.toLowerCase();
   if (/(angry|frustrat|terrible|hate|worst|not working|urgent|complain|sucks)/.test(message)) return 'frustrated';
   if (/(love|great|awesome|thanks|happy|excellent)/.test(message)) return 'happy';
@@ -81,17 +92,15 @@ function normalizeConfidence(value: number | undefined): number {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+function normalizePriority(value: string | undefined): string {
+  const raw = (value || '').trim().toLowerCase();
+  if ((VALID_PRIORITIES as readonly string[]).includes(raw)) return raw;
+  return 'medium';
+}
+
 function toTitleCase(value: string) {
   if (!value) return value;
   return value.charAt(0).toUpperCase() + value.slice(1);
-}
-
-function suggestedPriorityFromSentiment(sentiment: string | null): 'Low' | 'Medium' | 'High' | 'Pending' {
-  if (!sentiment) return 'Pending';
-  if (sentiment.toLowerCase() === 'frustrated') return 'High';
-  if (sentiment.toLowerCase() === 'neutral') return 'Medium';
-  if (sentiment.toLowerCase() === 'happy') return 'Low';
-  return 'Medium';
 }
 
 export default function Dashboard() {
@@ -128,7 +137,7 @@ export default function Dashboard() {
 
     const { data, error } = await supabase
       .from('messages')
-      .select('id,ticket_id,first_name,last_name,email,category,message,priority,created_at,ai_sentiment,ai_category,ai_confidence,ai_draft,final_response')
+      .select('id,ticket_id,first_name,last_name,email,category,message,priority,status,created_at,responded_at,ai_sentiment,ai_category,ai_priority,ai_confidence,ai_draft,final_response')
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -138,22 +147,27 @@ export default function Dashboard() {
       return;
     }
 
-    const formatted = ((data || []) as DbMessage[]).map((msg) => ({
-      id: msg.ticket_id || msg.id,
-      firstName: msg.first_name,
-      lastName: msg.last_name,
-      email: msg.email,
-      category: msg.ai_category ? toTitleCase(msg.ai_category) : 'Pending AI',
-      customerCategory: toTitleCase(msg.category),
-      message: msg.message,
-      priority: toTitleCase(msg.priority),
-      timestamp: msg.created_at,
-      sentiment: msg.ai_sentiment ? toTitleCase(msg.ai_sentiment) : null,
-      aiCategory: msg.ai_category ? toTitleCase(msg.ai_category) : null,
-      confidence: msg.ai_confidence,
-      aiDraft: msg.ai_draft,
-      finalResponse: msg.final_response
-    }));
+    const formatted = ((data || []) as DbMessage[]).map((msg) => {
+      const replied = msg.status === 'responded' || Boolean(msg.final_response);
+      return {
+        id: msg.ticket_id || msg.id,
+        firstName: msg.first_name,
+        lastName: msg.last_name,
+        email: msg.email,
+        category: msg.ai_category ? toTitleCase(msg.ai_category) : 'Pending AI',
+        customerCategory: toTitleCase(msg.category),
+        message: msg.message,
+        priority: msg.ai_priority ? toTitleCase(msg.ai_priority) : 'Pending',
+        timestamp: msg.created_at,
+        respondedAt: msg.responded_at,
+        replied,
+        sentiment: msg.ai_sentiment ? toTitleCase(msg.ai_sentiment) : null,
+        aiCategory: msg.ai_category ? toTitleCase(msg.ai_category) : null,
+        confidence: msg.ai_confidence,
+        aiDraft: msg.ai_draft,
+        finalResponse: msg.final_response
+      };
+    });
 
     setMessages(formatted);
     setIsLoading(false);
@@ -162,6 +176,19 @@ export default function Dashboard() {
   useEffect(() => {
     loadMessages();
   }, []);
+
+  const filteredMessages = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return messages;
+    return messages.filter((msg) =>
+      `${msg.id} ${msg.firstName} ${msg.lastName} ${msg.email} ${msg.category} ${msg.message}`
+        .toLowerCase()
+        .includes(term)
+    );
+  }, [messages, searchTerm]);
+
+  const pendingMessages = useMemo(() => filteredMessages.filter((message) => !message.replied), [filteredMessages]);
+  const repliedMessages = useMemo(() => filteredMessages.filter((message) => message.replied), [filteredMessages]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -178,7 +205,6 @@ export default function Dashboard() {
     }
 
     setIsGenerating(true);
-    setLoadError('');
 
     const payload = {
       ticketId: selectedMessage.id,
@@ -186,7 +212,7 @@ export default function Dashboard() {
       lastName: selectedMessage.lastName,
       email: selectedMessage.email,
       category: 'unspecified',
-      priority: selectedMessage.priority,
+      priority: 'unspecified',
       message: selectedMessage.message
     };
 
@@ -196,14 +222,12 @@ export default function Dashboard() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-
-      if (!response.ok) {
-        throw new Error(`Webhook call failed with status ${response.status}`);
-      }
+      if (!response.ok) throw new Error(`Webhook call failed with status ${response.status}`);
 
       const aiData = await response.json() as AiWebhookResponse;
       const sentiment = normalizeSentiment(aiData.sentiment, selectedMessage.message);
       const aiCategory = normalizeCategory(aiData.category, selectedMessage.message);
+      const aiPriority = normalizePriority(aiData.priority);
       const confidence = normalizeConfidence(aiData.confidence);
       const generatedDraft = aiData.draft_response || '';
 
@@ -212,35 +236,34 @@ export default function Dashboard() {
         .update({
           ai_sentiment: sentiment,
           ai_category: aiCategory,
+          ai_priority: aiPriority,
           ai_confidence: confidence,
           ai_draft: generatedDraft,
           ai_processed_at: new Date().toISOString(),
           ai_error: null,
-          status: 'ai_ready'
+          status: selectedMessage.replied ? 'responded' : 'ai_ready'
         })
         .eq('ticket_id', selectedMessage.id);
 
-      if (updateError) {
-        throw new Error(updateError.message);
-      }
+      if (updateError) throw new Error(updateError.message);
 
       setAiDraft(generatedDraft);
-      setSelectedMessage((current) => {
-        if (!current) return current;
-        return {
-          ...current,
-          category: toTitleCase(aiCategory),
-          sentiment: toTitleCase(sentiment),
-          aiCategory: toTitleCase(aiCategory),
-          confidence,
-          aiDraft: generatedDraft
-        };
-      });
-
+      setSelectedMessage((current) =>
+        current
+          ? {
+              ...current,
+              category: toTitleCase(aiCategory),
+              sentiment: toTitleCase(sentiment),
+              aiCategory: toTitleCase(aiCategory),
+              priority: toTitleCase(aiPriority),
+              confidence,
+              aiDraft: generatedDraft
+            }
+          : current
+      );
       await loadMessages();
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unable to generate AI response.';
-      setModalError(message);
+      setModalError(error instanceof Error ? error.message : 'Unable to generate AI response.');
     } finally {
       setIsGenerating(false);
     }
@@ -249,6 +272,7 @@ export default function Dashboard() {
   const handleSendResponse = async () => {
     if (!selectedMessage || !aiDraft || !currentUser) return;
     setModalError('');
+
     if (!emailJsServiceId || !emailJsTemplateId || !emailJsPublicKey) {
       setModalError('Missing EmailJS environment variables.');
       return;
@@ -269,38 +293,34 @@ export default function Dashboard() {
           sentiment: selectedMessage.sentiment || 'neutral',
           response_message: aiDraft
         },
-        {
-          publicKey: emailJsPublicKey
-        }
+        { publicKey: emailJsPublicKey }
       );
 
+      const respondedAt = new Date().toISOString();
       const { error } = await supabase
         .from('messages')
         .update({
           final_response: aiDraft,
           responded_by: currentUser.id,
-          responded_at: new Date().toISOString(),
+          responded_at: respondedAt,
           status: 'responded'
         })
         .eq('ticket_id', selectedMessage.id);
 
-      if (error) {
-        setIsSending(false);
-        setStatus('idle');
-        setModalError(error.message || 'Unable to send response.');
-        return;
-      }
+      if (error) throw new Error(error.message || 'Unable to send response.');
 
       setStatus('sent');
       await loadMessages();
 
       setTimeout(() => {
         setStatus('idle');
-        setAiDraft('');
-        setSelectedMessage(null);
-        setModalError('');
+        setSelectedMessage((current) =>
+          current
+            ? { ...current, replied: true, respondedAt, finalResponse: aiDraft }
+            : current
+        );
         setIsSending(false);
-      }, 1200);
+      }, 900);
     } catch (error) {
       let message = 'Unable to send email response.';
       if (error instanceof Error && error.message) {
@@ -311,30 +331,30 @@ export default function Dashboard() {
           message = knownError.status ? `EmailJS ${knownError.status}: ${knownError.text}` : knownError.text;
         } else if (knownError.message) {
           message = knownError.message;
-        } else {
-          try {
-            message = JSON.stringify(error);
-          } catch {
-            message = 'Unable to send email response.';
-          }
         }
       }
       setModalError(message);
-      setIsSending(false);
       setStatus('idle');
+      setIsSending(false);
     }
   };
 
-  const filteredMessages = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase();
-    if (!term) return messages;
+  const openMessage = (message: UiMessage) => {
+    setSelectedMessage(message);
+    setAiDraft(message.finalResponse || message.aiDraft || '');
+    setModalError('');
+  };
 
-    return messages.filter((msg) =>
-      `${msg.id} ${msg.firstName} ${msg.lastName} ${msg.email} ${msg.category} ${msg.message}`
-        .toLowerCase()
-        .includes(term)
-    );
-  }, [messages, searchTerm]);
+  const hasAiOutput =
+    selectedMessage != null
+      ? Boolean(
+          selectedMessage.aiDraft ||
+            selectedMessage.sentiment ||
+            selectedMessage.aiCategory ||
+            selectedMessage.confidence != null ||
+            (selectedMessage.priority && selectedMessage.priority !== 'Pending')
+        )
+      : false;
 
   return (
     <div className="min-h-screen flex flex-col bg-bg-dark">
@@ -343,7 +363,6 @@ export default function Dashboard() {
           <div className="w-8 h-8 bg-gradient-to-tr from-primary to-secondary rounded-lg" />
           <span className="text-xl font-bold tracking-tight">Support<span className="text-secondary">IQ</span> Admin</span>
         </div>
-
         <div className="flex items-center gap-6">
           <span className="text-xs text-text-muted font-semibold uppercase tracking-widest hidden md:inline">Live Environment</span>
           <button
@@ -356,61 +375,84 @@ export default function Dashboard() {
       </header>
 
       <main className="flex-1 p-8 grid grid-cols-1 lg:grid-cols-12 gap-8 max-w-7xl mx-auto w-full">
-        <div className="lg:col-span-3 space-y-8">
-          <div>
-            <h2 className="text-xs uppercase tracking-widest text-text-muted font-bold mb-4">Navigation</h2>
-            <nav className="space-y-2">
-              <button className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl bg-primary/10 text-primary font-bold text-sm">
-                <MessageSquare className="w-4 h-4" /> Inbox
-                <span className="ml-auto bg-primary text-white text-[10px] py-0.5 px-2 rounded-full">{filteredMessages.length}</span>
-              </button>
-            </nav>
-          </div>
-        </div>
-
-        <div className="lg:col-span-9">
-          <div className="flex justify-between items-center mb-6">
-            <h2 className="text-2xl font-bold">Customer Messages</h2>
-            <div className="flex gap-2">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
-                <input
-                  type="text"
-                  placeholder="Search tickets..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10 pr-4 py-1.5 text-sm w-64 bg-bg-card border-border"
-                />
+        <aside className="lg:col-span-3 space-y-6">
+          <section className="glass-morphism rounded-2xl p-5">
+            <h2 className="text-xs uppercase tracking-widest text-text-muted font-bold mb-4">Queues</h2>
+            <div className="space-y-3">
+              <div className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-primary/10 text-primary font-bold text-sm">
+                <MessageSquare className="w-4 h-4" /> Needs Reply
+                <span className="ml-auto bg-primary text-white text-[10px] py-0.5 px-2 rounded-full">{pendingMessages.length}</span>
               </div>
-              <button className="glass-morphism p-2 rounded-lg hover:border-primary/50" aria-label="Filter messages">
-                <Filter className="w-4 h-4" />
-              </button>
+              <div className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-success/10 text-success font-bold text-sm">
+                <CheckCircle2 className="w-4 h-4" /> Replied
+                <span className="ml-auto bg-success text-bg-dark text-[10px] py-0.5 px-2 rounded-full">{repliedMessages.length}</span>
+              </div>
+            </div>
+          </section>
+          <section className="glass-morphism rounded-2xl p-5">
+            <h3 className="text-sm font-semibold mb-3">Today Summary</h3>
+            <p className="text-xs text-text-muted leading-relaxed">
+              Tickets are split by reply status so active workload stays focused and completed conversations stay searchable.
+            </p>
+          </section>
+        </aside>
+
+        <section className="lg:col-span-9">
+          <div className="flex flex-wrap gap-4 justify-between items-center mb-6">
+            <h2 className="text-2xl font-bold">Customer Messages</h2>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+              <input
+                type="text"
+                placeholder="Search tickets..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10 pr-4 py-2 text-sm w-72 bg-bg-card border-border"
+              />
             </div>
           </div>
 
           {isLoading && <p className="text-text-muted">Loading messages...</p>}
           {!isLoading && loadError && <p className="text-error text-sm">{loadError}</p>}
-          {!isLoading && !loadError && filteredMessages.length === 0 && (
-            <p className="text-text-muted text-sm">No tickets found yet.</p>
-          )}
 
-          {!isLoading && !loadError && filteredMessages.length > 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {filteredMessages.map((msg) => (
-                <MessageCard
-                  key={msg.id}
-                  message={msg}
-                  onClick={(chosenMessage) => {
-                    const chosen = chosenMessage as UiMessage;
-                    setSelectedMessage(chosen);
-                    setAiDraft(chosen.aiDraft || chosen.finalResponse || '');
-                    setLoadError('');
-                  }}
-                />
-              ))}
+          {!isLoading && !loadError && (
+            <div className="space-y-8">
+              <section>
+                <div className="flex items-center gap-2 mb-4">
+                  <AlertCircle className="w-4 h-4 text-secondary" />
+                  <h3 className="text-lg font-semibold">Needs Reply</h3>
+                  <span className="text-xs text-text-muted">{pendingMessages.length} ticket(s)</span>
+                </div>
+                {pendingMessages.length === 0 ? (
+                  <p className="text-sm text-text-muted border border-border rounded-xl px-4 py-3 bg-bg-card/30">No pending tickets.</p>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {pendingMessages.map((message) => (
+                      <MessageCard key={message.id} message={message} onClick={() => openMessage(message)} />
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section>
+                <div className="flex items-center gap-2 mb-4">
+                  <CheckCircle2 className="w-4 h-4 text-success" />
+                  <h3 className="text-lg font-semibold">Replied</h3>
+                  <span className="text-xs text-text-muted">{repliedMessages.length} ticket(s)</span>
+                </div>
+                {repliedMessages.length === 0 ? (
+                  <p className="text-sm text-text-muted border border-border rounded-xl px-4 py-3 bg-bg-card/30">No replied tickets yet.</p>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {repliedMessages.map((message) => (
+                      <MessageCard key={message.id} message={message} onClick={() => openMessage(message)} />
+                    ))}
+                  </div>
+                )}
+              </section>
             </div>
           )}
-        </div>
+        </section>
       </main>
 
       <AnimatePresence>
@@ -419,146 +461,115 @@ export default function Dashboard() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-bg-dark/80 backdrop-blur-sm flex items-center justify-center p-6"
+            className="fixed inset-0 z-50 bg-bg-dark/85 backdrop-blur-sm flex items-center justify-center p-4 md:p-6"
           >
             <motion.div
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="glass-morphism rounded-2xl w-full max-w-6xl max-h-[90vh] flex flex-col overflow-hidden"
+              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              className="glass-morphism rounded-2xl w-full max-w-6xl max-h-[92vh] flex flex-col overflow-hidden"
             >
-              <div className="p-6 border-b border-border flex justify-between items-center bg-bg-card/50">
+              <div className="p-5 md:p-6 border-b border-border flex justify-between items-start bg-bg-card/40">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-lg">
                     {selectedMessage.firstName[0]}{selectedMessage.lastName[0]}
                   </div>
                   <div>
                     <h3 className="font-bold text-xl">{selectedMessage.firstName} {selectedMessage.lastName}</h3>
-                    <div className="flex items-center gap-4 mt-1">
-                      <span className="text-xs text-text-muted flex items-center gap-1">
-                        <Mail className="w-3 h-3" /> {selectedMessage.email}
-                      </span>
-                      <span className="text-xs text-text-muted flex items-center gap-1">
-                        <Clock className="w-3 h-3" /> {new Date(selectedMessage.timestamp).toLocaleString()}
-                      </span>
+                    <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-text-muted">
+                      <span className="flex items-center gap-1"><Mail className="w-3 h-3" /> {selectedMessage.email}</span>
+                      <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {new Date(selectedMessage.timestamp).toLocaleString()}</span>
+                      {selectedMessage.replied && selectedMessage.respondedAt && (
+                        <span className="flex items-center gap-1 text-success">
+                          <CheckCircle2 className="w-3 h-3" />
+                          Replied on {new Date(selectedMessage.respondedAt).toLocaleString()}
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
-                <button
-                  onClick={() => setSelectedMessage(null)}
-                  className="p-2 hover:bg-white/10 rounded-full transition-colors"
-                >
-                  <X className="w-6 h-6" />
-                </button>
+                <button onClick={() => setSelectedMessage(null)} className="p-2 hover:bg-white/10 rounded-full transition-colors">✕</button>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-6 lg:p-8 grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8">
-                <div className="space-y-6 lg:col-span-5">
+              <div className="flex-1 overflow-y-auto p-5 md:p-7 grid grid-cols-1 lg:grid-cols-12 gap-5">
+                <div className="space-y-5 lg:col-span-5">
                   <div>
                     <h1 className="text-3xl font-bold mb-2">{selectedMessage.aiCategory || 'Untriaged'} Issue</h1>
-                    <p className="text-text-muted flex items-center gap-2 text-sm font-medium">
-                      <span className={`w-2 h-2 rounded-full ${
-                        selectedMessage.priority === 'High' ? 'bg-error' :
-                        selectedMessage.priority === 'Medium' ? 'bg-amber-500' :
-                        'bg-success'
-                      }`}
-                      />
-                      Ticket ID: {selectedMessage.id} | From: {selectedMessage.email}
-                    </p>
+                    <p className="text-text-muted text-sm font-medium">Ticket ID: {selectedMessage.id}</p>
                     <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                      <span className="px-2.5 py-1 rounded-full bg-bg-card border border-border text-text-muted">
-                        Customer: {selectedMessage.customerCategory}
-                      </span>
-                      <span className="px-2.5 py-1 rounded-full bg-bg-card border border-border text-text-muted">
-                        AI: {selectedMessage.aiCategory || 'Pending'}
-                      </span>
+                      <span className="px-2.5 py-1 rounded-full bg-bg-card border border-border text-text-muted">AI: {selectedMessage.aiCategory || 'Pending'}</span>
                     </div>
                   </div>
 
-                  <div className="bg-bg-card p-6 rounded-2xl border border-border shadow-inner">
-                    <p className="text-base lg:text-lg leading-relaxed text-text-light font-medium italic">
-                      "{selectedMessage.message}"
-                    </p>
+                  <div className="bg-bg-card p-5 rounded-2xl border border-border shadow-inner">
+                    <p className="text-base leading-relaxed text-text-light font-medium italic">"{selectedMessage.message}"</p>
                   </div>
 
-                  <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-                    <div className="px-4 py-4 min-h-[96px] bg-bg-card/50 border border-border rounded-xl">
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="px-4 py-4 min-h-[92px] bg-bg-card/50 border border-border rounded-xl">
                       <p className="text-[10px] uppercase tracking-widest text-text-muted mb-1 font-bold">Sentiment</p>
-                      <p className="text-base lg:text-lg leading-tight break-words font-bold text-primary">
-                        {selectedMessage.sentiment || 'Pending'}
-                      </p>
+                      <p className="text-base font-bold text-primary">{selectedMessage.sentiment || 'Pending'}</p>
                     </div>
-                    <div className="px-4 py-4 min-h-[96px] bg-bg-card/50 border border-border rounded-xl">
-                      <p className="text-[10px] uppercase tracking-widest text-text-muted mb-1 font-bold">Priority</p>
-                      <p className={`text-base lg:text-lg leading-tight break-words font-bold ${
-                        selectedMessage.priority === 'High' ? 'text-secondary' :
-                        selectedMessage.priority === 'Medium' ? 'text-amber-500' :
-                        'text-success'
-                      }`}
-                      >
-                        {selectedMessage.priority}
-                      </p>
-                    </div>
-                    <div className="px-4 py-4 min-h-[96px] bg-bg-card/50 border border-border rounded-xl">
+                    <div className="px-4 py-4 min-h-[92px] bg-bg-card/50 border border-border rounded-xl">
                       <p className="text-[10px] uppercase tracking-widest text-text-muted mb-1 font-bold">AI Priority</p>
-                      <p className="text-base lg:text-lg leading-tight break-words font-bold text-secondary">
-                        {suggestedPriorityFromSentiment(selectedMessage.sentiment)}
-                      </p>
+                      <p className="text-base font-bold text-secondary">{selectedMessage.priority || 'Pending'}</p>
                     </div>
-                    <div className="px-4 py-4 min-h-[96px] bg-bg-card/50 border border-border rounded-xl">
+                    <div className="px-4 py-4 min-h-[92px] bg-bg-card/50 border border-border rounded-xl">
                       <p className="text-[10px] uppercase tracking-widest text-text-muted mb-1 font-bold">Confidence</p>
-                      <p className="text-base lg:text-lg leading-tight break-words font-bold text-success">
-                        {selectedMessage.confidence != null ? `${selectedMessage.confidence}%` : 'Pending'}
-                      </p>
+                      <p className="text-base font-bold text-success">{selectedMessage.confidence != null ? `${selectedMessage.confidence}%` : 'Pending'}</p>
                     </div>
                   </div>
                 </div>
 
-                <div className="flex flex-col h-full bg-bg-card/20 rounded-2xl p-6 lg:p-7 border border-border lg:col-span-7">
-                  <div className="flex justify-between items-center mb-6">
+                <div className="flex flex-col h-full bg-bg-card/20 rounded-2xl p-5 border border-border lg:col-span-7">
+                  <div className="flex justify-between items-center mb-5">
                     <h4 className="text-sm font-bold uppercase tracking-widest text-text-muted flex items-center gap-2">
                       <Sparkles className="w-4 h-4 text-secondary" /> AI Response Draft
                     </h4>
                     <button
                       onClick={handleGenerateResponse}
                       disabled={isGenerating}
-                      className="text-[10px] font-bold uppercase tracking-tighter text-secondary hover:text-secondary/80 transition-colors"
+                      className="ai-generate-btn"
                     >
-                      {isGenerating ? 'GENERATE...' : 'RE-GENERATE'}
+                      <svg
+                        height="20"
+                        width="20"
+                        viewBox="0 0 24 24"
+                        data-name="Layer 1"
+                        id="Layer_1"
+                        className="ai-generate-sparkle"
+                      >
+                        <path d="M10,21.236,6.755,14.745.264,11.5,6.755,8.255,10,1.764l3.245,6.491L19.736,11.5l-6.491,3.245ZM18,21l1.5,3L21,21l3-1.5L21,18l-1.5-3L18,18l-3,1.5ZM19.333,4.667,20.5,7l1.167-2.333L24,3.5,21.667,2.333,20.5,0,19.333,2.333,17,3.5Z" />
+                      </svg>
+                      <span className="ai-generate-text">
+                        {isGenerating ? 'Generating...' : hasAiOutput ? 'Re-Generate' : 'Generate'}
+                      </span>
                     </button>
                   </div>
 
-                  <div className="relative flex-1">
-                    <textarea
-                      value={aiDraft}
-                      onChange={(e) => setAiDraft(e.target.value)}
-                      placeholder={isGenerating ? 'AI is analyzing context and drafting response...' : 'The generated response will appear here.'}
-                      className="w-full h-full min-h-[280px] resize-none font-sans text-sm leading-relaxed bg-bg-card/40 border border-border rounded-xl p-4 focus:ring-1 focus:ring-primary/60"
-                    />
-                    {!aiDraft && !isGenerating && (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-text-muted opacity-20">
-                        <Sparkles className="w-16 h-16 mb-4" />
-                        <p className="font-bold uppercase tracking-widest text-xs">Ready to Draft</p>
-                      </div>
-                    )}
-                  </div>
+                  <textarea
+                    value={aiDraft}
+                    onChange={(e) => setAiDraft(e.target.value)}
+                    placeholder={isGenerating ? 'AI is analyzing context and drafting response...' : 'The generated response will appear here.'}
+                    className="w-full flex-1 min-h-[280px] resize-none font-sans text-sm leading-relaxed bg-bg-card/40 border border-border rounded-xl p-4 focus:ring-1 focus:ring-primary/60"
+                  />
 
-                  <div className="mt-6 pt-6 border-t border-border flex gap-4">
+                  <div className="mt-5 pt-5 border-t border-border space-y-3">
                     <button
                       onClick={handleSendResponse}
                       disabled={!aiDraft || status !== 'idle' || isSending}
-                      className="btn-primary flex-1 py-4 text-sm flex items-center justify-center gap-3"
+                      className="btn-primary w-full py-3 text-sm flex items-center justify-center gap-3"
                     >
                       {status === 'sending' ? <Loader2 className="w-5 h-5 animate-spin" /> :
                         status === 'sent' ? 'Email Sent' :
-                          <><Send className="w-4 h-4" /> Send Response</>}
+                          <><Send className="w-4 h-4" /> {selectedMessage.replied ? 'Update Reply' : 'Send Response'}</>}
                     </button>
+                    {modalError && (
+                      <p className="text-xs text-error bg-error/10 border border-error/20 rounded-lg px-3 py-2">
+                        {modalError}
+                      </p>
+                    )}
                   </div>
-                  {modalError && (
-                    <p className="mt-3 text-xs text-error bg-error/10 border border-error/20 rounded-lg px-3 py-2">
-                      {modalError}
-                    </p>
-                  )}
                 </div>
               </div>
             </motion.div>

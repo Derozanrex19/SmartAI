@@ -49,8 +49,7 @@ export default function ContactForm({ onSubmit }: ContactFormProps) {
     firstName: '',
     lastName: '',
     email: '',
-    message: '',
-    priority: 'High'
+    message: ''
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -103,7 +102,8 @@ export default function ContactForm({ onSubmit }: ContactFormProps) {
       email: formData.email.trim().toLowerCase(),
       // Customer no longer selects category; AI triage will classify this later.
       category: 'other',
-      priority: formData.priority.toLowerCase(),
+      // Keep a neutral default internally; AI priority is shown in dashboard.
+      priority: 'medium',
       message: formData.message.trim(),
       status: 'new'
     };
@@ -133,8 +133,7 @@ export default function ContactForm({ onSubmit }: ContactFormProps) {
       firstName: '',
       lastName: '',
       email: '',
-      message: '',
-      priority: 'High'
+      message: ''
     });
     setTicketId(null);
     setSubmitError('');
@@ -233,30 +232,9 @@ export default function ContactForm({ onSubmit }: ContactFormProps) {
               {formData.message.length} / 20 chars min
             </span>
           </div>
-        </div>
-
-        <div className="flex flex-col gap-3">
-          <label className="text-sm font-medium text-text-muted">Priority</label>
-          <div className="flex gap-6">
-            {['Low', 'Medium', 'High'].map((p) => (
-              <label key={p} className="flex items-center gap-2 cursor-pointer group">
-                <div className="relative flex items-center justify-center">
-                  <input 
-                    type="radio" 
-                    name="priority"
-                    value={p}
-                    checked={formData.priority === p}
-                    onChange={(e) => setFormData({...formData, priority: e.target.value})}
-                    className="appearance-none w-5 h-5 border border-border rounded-full checked:border-primary transition-all cursor-pointer"
-                  />
-                  {formData.priority === p && (
-                    <div className="absolute w-2.5 h-2.5 bg-primary rounded-full" />
-                  )}
-                </div>
-                <span className="text-sm">{p}</span>
-              </label>
-            ))}
-          </div>
+          <p className="text-xs text-text-muted">
+            Tip: include what happened, when it started, and any error messages you saw.
+          </p>
         </div>
 
         <button 
@@ -286,6 +264,9 @@ export default function ContactForm({ onSubmit }: ContactFormProps) {
             </motion.div>
           )}
         </AnimatePresence>
+        <p className="text-[11px] text-text-muted text-center">
+          Your concern is reviewed securely. AI triage helps route your ticket faster.
+        </p>
       </form>
     </div>
   );

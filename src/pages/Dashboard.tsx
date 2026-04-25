@@ -47,6 +47,13 @@ interface AiWebhookResponse {
   draft_response?: string;
 }
 
+interface SendEmailResponse {
+  ok?: boolean;
+  provider?: string;
+  deliveryStatus?: 'queued' | 'sent' | 'failed';
+  messageId?: string | null;
+}
+
 const VALID_CATEGORIES = ['technical', 'billing', 'feedback', 'other'] as const;
 const VALID_SENTIMENTS = ['frustrated', 'neutral', 'happy'] as const;
 
@@ -101,7 +108,7 @@ export default function Dashboard() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [aiDraft, setAiDraft] = useState('');
-  const [status, setStatus] = useState<'idle' | 'sending' | 'sent'>('idle');
+  const [status, setStatus] = useState<'idle' | 'sending' | 'queued'>('idle');
   const [searchTerm, setSearchTerm] = useState('');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const navigate = useNavigate();
@@ -246,6 +253,31 @@ export default function Dashboard() {
     setIsSending(true);
     setStatus('sending');
 
+    const { data: sendData, error: functionError } = await supabase.functions.invoke<SendEmailResponse>('send-support-response', {
+      body: {
+        ticketId: selectedMessage.id,
+        toEmail: selectedMessage.email,
+        customerName: `${selectedMessage.firstName} ${selectedMessage.lastName}`,
+        aiCategory: selectedMessage.aiCategory || 'other',
+        sentiment: selectedMessage.sentiment || 'neutral',
+        responseText: aiDraft
+      }
+    });
+
+    if (functionError) {
+      setIsSending(false);
+      setStatus('idle');
+      setLoadError(functionError.message || 'Unable to send email response.');
+      return;
+    }
+
+    if (!sendData?.ok) {
+      setIsSending(false);
+      setStatus('idle');
+      setLoadError('Email provider did not accept the message.');
+      return;
+    }
+
     const { error } = await supabase
       .from('messages')
       .update({
@@ -263,7 +295,7 @@ export default function Dashboard() {
       return;
     }
 
-    setStatus('sent');
+    setStatus('queued');
     await loadMessages();
 
     setTimeout(() => {
@@ -499,7 +531,7 @@ export default function Dashboard() {
                       className="btn-primary flex-1 py-4 text-sm flex items-center justify-center gap-3"
                     >
                       {status === 'sending' ? <Loader2 className="w-5 h-5 animate-spin" /> :
-                        status === 'sent' ? 'Response Sent!' :
+                        status === 'queued' ? 'Email Queued' :
                           <><Send className="w-4 h-4" /> Send Response</>}
                     </button>
                   </div>

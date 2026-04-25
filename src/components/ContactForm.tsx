@@ -8,6 +8,42 @@ interface ContactFormProps {
   onSubmit: (data: any) => void;
 }
 
+function validateSupportEmail(email: string): string | null {
+  const value = email.trim().toLowerCase();
+  const basicRegex = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9-]+(\.[a-z0-9-]+)+$/i;
+  if (!basicRegex.test(value)) {
+    return 'Please enter a valid email address';
+  }
+
+  const [localPart, domain] = value.split('@');
+  if (!localPart || !domain) {
+    return 'Please enter a valid email address';
+  }
+
+  const blockedDomains = new Set([
+    'example.com',
+    'test.com',
+    'mailinator.com',
+    'tempmail.com',
+    '10minutemail.com',
+    'guerrillamail.com'
+  ]);
+  if (blockedDomains.has(domain)) {
+    return 'Please use a real email address you can access';
+  }
+
+  // Heuristic to catch obvious keyboard-smash style emails.
+  const cleanedLocal = localPart.replace(/[._-]/g, '');
+  const vowels = (cleanedLocal.match(/[aeiou]/g) || []).length;
+  const vowelRatio = cleanedLocal.length > 0 ? vowels / cleanedLocal.length : 0;
+  const hasOnlyLetters = /^[a-z]+$/.test(cleanedLocal);
+  if (cleanedLocal.length >= 12 && hasOnlyLetters && vowelRatio < 0.25) {
+    return 'Please use a real email address you can access';
+  }
+
+  return null;
+}
+
 export default function ContactForm({ onSubmit }: ContactFormProps) {
   const [formData, setFormData] = useState({
     firstName: '',
@@ -37,8 +73,11 @@ export default function ContactForm({ onSubmit }: ContactFormProps) {
     if (!formData.lastName) newErrors.lastName = 'Last name is required';
     if (!formData.email) {
       newErrors.email = 'Email is required';
-    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      newErrors.email = 'Email is invalid';
+    } else {
+      const emailError = validateSupportEmail(formData.email);
+      if (emailError) {
+        newErrors.email = emailError;
+      }
     }
     if (formData.message.length < 20) newErrors.message = 'Message must be at least 20 characters';
     

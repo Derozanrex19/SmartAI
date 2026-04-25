@@ -53,6 +53,29 @@ In Supabase dashboard -> Authentication -> URL Configuration:
    - `https://<your-subdomain>.app.n8n.cloud/webhook/supportiq-analyze`
 3. Use test URL only when manually testing workflow editor.
 
+## Email Sending Setup (Admin `Send Response`)
+This project sends customer email replies through a Supabase Edge Function + Resend API.
+
+### 1. Create Resend setup
+1. Create a Resend account.
+2. Verify a sending domain or sender email.
+3. Copy your `RESEND_API_KEY`.
+
+### 2. Set Supabase function secrets
+In Supabase project root (CLI):
+- `supabase secrets set RESEND_API_KEY=re_xxxxx`
+- `supabase secrets set SUPPORT_FROM_EMAIL="SupportIQ <support@your-domain.com>"`
+
+### 3. Deploy edge function
+- `supabase functions deploy send-support-response`
+
+### 4. Test from app
+1. Login as admin.
+2. Open a ticket.
+3. Click `Send Response`.
+4. Confirm customer mailbox receives the reply.
+5. Confirm `messages` row is updated to `responded`.
+
 ## Production Smoke Test
 1. Submit customer ticket on `/`.
 2. Login as seeded Supabase admin.

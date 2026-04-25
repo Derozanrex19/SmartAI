@@ -22,6 +22,9 @@ For local and Vercel:
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
 - `VITE_N8N_WEBHOOK_URL`
+- `VITE_EMAILJS_SERVICE_ID`
+- `VITE_EMAILJS_TEMPLATE_ID`
+- `VITE_EMAILJS_PUBLIC_KEY`
 
 ## Vercel Deployment
 1. Import this GitHub repo into Vercel.
@@ -34,6 +37,9 @@ For local and Vercel:
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_ANON_KEY`
    - `VITE_N8N_WEBHOOK_URL`
+   - `VITE_EMAILJS_SERVICE_ID`
+   - `VITE_EMAILJS_TEMPLATE_ID`
+   - `VITE_EMAILJS_PUBLIC_KEY`
 5. Deploy.
 
 ## SPA Routing (Important)
@@ -54,20 +60,30 @@ In Supabase dashboard -> Authentication -> URL Configuration:
 3. Use test URL only when manually testing workflow editor.
 
 ## Email Sending Setup (Admin `Send Response`)
-This project sends customer email replies through a Supabase Edge Function + Resend API.
+This project sends customer replies directly from the frontend using EmailJS.
 
-### 1. Create Resend setup
-1. Create a Resend account.
-2. Verify a sending domain or sender email.
-3. Copy your `RESEND_API_KEY`.
+### 1. Create EmailJS setup
+1. Create an EmailJS account.
+2. Connect your email service (Gmail/Outlook/custom SMTP).
+3. Create an email template.
+4. Copy:
+   - Service ID
+   - Template ID
+   - Public Key
 
-### 2. Set Supabase function secrets
-In Supabase project root (CLI):
-- `supabase secrets set RESEND_API_KEY=re_xxxxx`
-- `supabase secrets set SUPPORT_FROM_EMAIL="SupportIQ <support@your-domain.com>"`
+### 2. Configure template variables
+The app sends these variables:
+- `to_email`
+- `to_name`
+- `ticket_id`
+- `ai_category`
+- `sentiment`
+- `response_message`
 
-### 3. Deploy edge function
-- `supabase functions deploy send-support-response`
+### 3. Add Vercel/local env vars
+- `VITE_EMAILJS_SERVICE_ID`
+- `VITE_EMAILJS_TEMPLATE_ID`
+- `VITE_EMAILJS_PUBLIC_KEY`
 
 ### 4. Test from app
 1. Login as admin.

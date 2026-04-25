@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { Search, Filter, X, Sparkles, Send, Loader2, MessageSquare, Mail, Clock } from 'lucide-react';
 import type { User } from '@supabase/supabase-js';
+import emailjs from '@emailjs/browser';
 import MessageCard from '../components/MessageCard';
 import { supabase } from '../lib/supabase';
 
@@ -45,13 +46,6 @@ interface AiWebhookResponse {
   category?: string;
   confidence?: number;
   draft_response?: string;
-}
-
-interface SendEmailResponse {
-  ok?: boolean;
-  provider?: string;
-  deliveryStatus?: 'queued' | 'sent' | 'failed';
-  messageId?: string | null;
 }
 
 const VALID_CATEGORIES = ['technical', 'billing', 'feedback', 'other'] as const;
@@ -108,12 +102,15 @@ export default function Dashboard() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [aiDraft, setAiDraft] = useState('');
-  const [status, setStatus] = useState<'idle' | 'sending' | 'queued'>('idle');
+  const [status, setStatus] = useState<'idle' | 'sending' | 'sent'>('idle');
   const [searchTerm, setSearchTerm] = useState('');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const navigate = useNavigate();
 
   const n8nWebhookUrl = import.meta.env.VITE_N8N_WEBHOOK_URL as string | undefined;
+  const emailJsServiceId = import.meta.env.VITE_EMAILJS_SERVICE_ID as string | undefined;
+  const emailJsTemplateId = import.meta.env.VITE_EMAILJS_TEMPLATE_ID as string | undefined;
+  const emailJsPublicKey = import.meta.env.VITE_EMAILJS_PUBLIC_KEY as string | undefined;
 
   const loadMessages = async () => {
     setIsLoading(true);
@@ -249,61 +246,63 @@ export default function Dashboard() {
 
   const handleSendResponse = async () => {
     if (!selectedMessage || !aiDraft || !currentUser) return;
+    if (!emailJsServiceId || !emailJsTemplateId || !emailJsPublicKey) {
+      setLoadError('Missing EmailJS environment variables.');
+      return;
+    }
 
     setIsSending(true);
     setStatus('sending');
 
-    const { data: sendData, error: functionError } = await supabase.functions.invoke<SendEmailResponse>('send-support-response', {
-      body: {
-        ticketId: selectedMessage.id,
-        toEmail: selectedMessage.email,
-        customerName: `${selectedMessage.firstName} ${selectedMessage.lastName}`,
-        aiCategory: selectedMessage.aiCategory || 'other',
-        sentiment: selectedMessage.sentiment || 'neutral',
-        responseText: aiDraft
+    try {
+      await emailjs.send(
+        emailJsServiceId,
+        emailJsTemplateId,
+        {
+          to_email: selectedMessage.email,
+          to_name: `${selectedMessage.firstName} ${selectedMessage.lastName}`,
+          ticket_id: selectedMessage.id,
+          ai_category: selectedMessage.aiCategory || 'other',
+          sentiment: selectedMessage.sentiment || 'neutral',
+          response_message: aiDraft
+        },
+        {
+          publicKey: emailJsPublicKey
+        }
+      );
+
+      const { error } = await supabase
+        .from('messages')
+        .update({
+          final_response: aiDraft,
+          responded_by: currentUser.id,
+          responded_at: new Date().toISOString(),
+          status: 'responded'
+        })
+        .eq('ticket_id', selectedMessage.id);
+
+      if (error) {
+        setIsSending(false);
+        setStatus('idle');
+        setLoadError(error.message || 'Unable to send response.');
+        return;
       }
-    });
 
-    if (functionError) {
+      setStatus('sent');
+      await loadMessages();
+
+      setTimeout(() => {
+        setStatus('idle');
+        setAiDraft('');
+        setSelectedMessage(null);
+        setIsSending(false);
+      }, 1200);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to send email response.';
+      setLoadError(message);
       setIsSending(false);
       setStatus('idle');
-      setLoadError(functionError.message || 'Unable to send email response.');
-      return;
     }
-
-    if (!sendData?.ok) {
-      setIsSending(false);
-      setStatus('idle');
-      setLoadError('Email provider did not accept the message.');
-      return;
-    }
-
-    const { error } = await supabase
-      .from('messages')
-      .update({
-        final_response: aiDraft,
-        responded_by: currentUser.id,
-        responded_at: new Date().toISOString(),
-        status: 'responded'
-      })
-      .eq('ticket_id', selectedMessage.id);
-
-    if (error) {
-      setIsSending(false);
-      setStatus('idle');
-      setLoadError(error.message || 'Unable to send response.');
-      return;
-    }
-
-    setStatus('queued');
-    await loadMessages();
-
-    setTimeout(() => {
-      setStatus('idle');
-      setAiDraft('');
-      setSelectedMessage(null);
-      setIsSending(false);
-    }, 1200);
   };
 
   const filteredMessages = useMemo(() => {
@@ -531,7 +530,7 @@ export default function Dashboard() {
                       className="btn-primary flex-1 py-4 text-sm flex items-center justify-center gap-3"
                     >
                       {status === 'sending' ? <Loader2 className="w-5 h-5 animate-spin" /> :
-                        status === 'queued' ? 'Email Queued' :
+                        status === 'sent' ? 'Email Sent' :
                           <><Send className="w-4 h-4" /> Send Response</>}
                     </button>
                   </div>

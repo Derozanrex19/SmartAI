@@ -56,18 +56,17 @@ Safety guardrails:
 - `VITE_EMAILJS_TEMPLATE_ID`
 - `VITE_EMAILJS_PUBLIC_KEY`
 
-### n8n runtime secrets (for AI + auto-send branches)
-- `OPENAI_API_KEY`
+### n8n runtime secrets (for auto-send branch)
 - `EMAILJS_SERVICE_ID`
 - `EMAILJS_TEMPLATE_ID`
 - `EMAILJS_PUBLIC_KEY`
 
-### n8n credential setup for OpenAI
+### n8n credential setup for Gemini
 - Node: `HTTP Request` (AI call)
-- URL: `https://api.openai.com/v1/chat/completions`
+- URL: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`
 - Auth: `Header Auth`
-- Header name: `Authorization`
-- Header value: `Bearer <OPENAI_API_KEY>`
+- Header name: `x-goog-api-key`
+- Header value: `<GEMINI_API_KEY>`
 - Keep body in JSON mode (workflow import already includes required schema + prompt).
 
 ## Local Run

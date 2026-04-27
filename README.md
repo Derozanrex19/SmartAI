@@ -59,6 +59,51 @@ In Supabase dashboard -> Authentication -> URL Configuration:
    - `https://<your-subdomain>.app.n8n.cloud/webhook/supportiq-analyze`
 3. Use test URL only when manually testing workflow editor.
 
+## n8n Priority Fix
+The dashboard now supports message-based fallback priority detection, but you should still update your `n8n` workflow so Gemini returns `priority` directly.
+
+### What changed
+- Expected AI response now includes:
+  - `sentiment`
+  - `category`
+  - `priority`
+  - `confidence`
+  - `draft_response`
+- Allowed `priority` values are:
+  - `low`
+  - `medium`
+  - `high`
+
+### Step-by-step n8n update
+1. Open your `supportiq-analyze` workflow in n8n.
+2. Open the `HTTP Request` node that calls Gemini.
+3. In the request body / prompt text, update the JSON schema so it includes:
+   - `"priority": "low" | "medium" | "high"`
+4. Remove the old instruction that says:
+   - `Priority is NOT requested here. Do not output priority.`
+5. Add a priority guide to the prompt:
+   - `high`: urgent outages, blocked access, account lockouts, repeated failures, security concerns, duplicate or unauthorized charges, anything preventing product use
+   - `medium`: standard bugs, billing questions, login trouble without clear outage, non-urgent service issues
+   - `low`: praise, suggestions, simple questions, non-blocking requests
+6. Keep the output format as JSON only.
+7. Open the `Code in JavaScript` node after the Gemini call.
+8. Make sure it reads `parsed.priority` from the Gemini response.
+9. Validate `priority` so only `low`, `medium`, or `high` are returned.
+10. If `priority` is missing or invalid, default it to `medium` inside the n8n node.
+11. Save the workflow.
+12. Click `Test workflow` and send a sample urgent ticket such as:
+    - `I can't log in and our whole team is blocked from accessing the dashboard.`
+13. Confirm the webhook response now includes:
+    - `"priority": "high"`
+14. Publish or activate the updated workflow.
+15. In the app dashboard, click `Re-Generate` on a ticket and confirm the priority badge changes from `Pending` or `Medium` to the expected value.
+
+### Fastest option
+This repo includes an updated workflow export at:
+- `SupportIQ.json`
+
+You can import that file into n8n, review credentials, and publish it instead of editing the workflow manually.
+
 ## Email Sending Setup (Admin `Send Response`)
 This project sends customer replies directly from the frontend using EmailJS.
 

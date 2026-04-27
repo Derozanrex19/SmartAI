@@ -92,9 +92,91 @@ function normalizeConfidence(value: number | undefined): number {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
-function normalizePriority(value: string | undefined): string {
+function normalizePriority(value: string | undefined): string | null {
   const raw = (value || '').trim().toLowerCase();
   if ((VALID_PRIORITIES as readonly string[]).includes(raw)) return raw;
+  return null;
+}
+
+function inferPriorityFromMessage(message: string, category?: string, sentiment?: string): string {
+  const normalizedMessage = message.trim().toLowerCase();
+  const normalizedCategory = (category || '').trim().toLowerCase();
+  const normalizedSentiment = (sentiment || '').trim().toLowerCase();
+
+  const urgentPatterns = [
+    /\burgent\b/,
+    /\basap\b/,
+    /\bimmediately\b/,
+    /\bright now\b/,
+    /\bcritical\b/,
+    /\bsevere\b/,
+    /\bproduction\b/,
+    /\bdown\b/,
+    /\boutage\b/,
+    /\bblocked\b/,
+    /\bcan'?t access\b/,
+    /\bcannot access\b/,
+    /\bunable to access\b/,
+    /\bnot working at all\b/,
+    /\bcompletely broken\b/,
+    /\baccount locked\b/,
+    /\bcharged twice\b/,
+    /\bfraud\b/,
+    /\bunauthorized charge\b/
+  ];
+
+  const mediumPatterns = [
+    /\berror\b/,
+    /\bissue\b/,
+    /\bproblem\b/,
+    /\bbug\b/,
+    /\bfailed\b/,
+    /\bnot working\b/,
+    /\brefund\b/,
+    /\bbilling\b/,
+    /\binvoice\b/,
+    /\bpayment\b/,
+    /\blogin\b/,
+    /\bcrash\b/,
+    /\bslow\b/,
+    /\bunable\b/,
+    /\bdelay\b/
+  ];
+
+  const lowPatterns = [
+    /\bfeature request\b/,
+    /\bsuggestion\b/,
+    /\bidea\b/,
+    /\bfeedback\b/,
+    /\bjust wanted to ask\b/,
+    /\bcurious\b/,
+    /\bthank you\b/,
+    /\blove\b/,
+    /\bgreat\b/
+  ];
+
+  const isHigh =
+    urgentPatterns.some((pattern) => pattern.test(normalizedMessage)) ||
+    (normalizedSentiment === 'frustrated' &&
+      /(still|again|days|weeks|multiple|repeated|repeatedly|cannot|can't|unable)/.test(normalizedMessage)) ||
+    (normalizedCategory === 'technical' &&
+      /(production|down|blocked|login|cannot access|can't access|unable to access)/.test(normalizedMessage));
+
+  if (isHigh) return 'high';
+
+  const isLow =
+    lowPatterns.some((pattern) => pattern.test(normalizedMessage)) ||
+    normalizedCategory === 'feedback' ||
+    normalizedSentiment === 'happy';
+
+  if (isLow && !mediumPatterns.some((pattern) => pattern.test(normalizedMessage))) {
+    return 'low';
+  }
+
+  if (mediumPatterns.some((pattern) => pattern.test(normalizedMessage))) {
+    return 'medium';
+  }
+
   return 'medium';
 }
 
@@ -228,6 +310,8 @@ export default function Dashboard() {
       const sentiment = normalizeSentiment(aiData.sentiment, selectedMessage.message);
       const aiCategory = normalizeCategory(aiData.category, selectedMessage.message);
       const aiPriority = normalizePriority(aiData.priority);
+      const resolvedPriority =
+        aiPriority ?? inferPriorityFromMessage(selectedMessage.message, aiCategory, sentiment);
       const confidence = normalizeConfidence(aiData.confidence);
       const generatedDraft = aiData.draft_response || '';
 
@@ -236,7 +320,7 @@ export default function Dashboard() {
         .update({
           ai_sentiment: sentiment,
           ai_category: aiCategory,
-          ai_priority: aiPriority,
+          ai_priority: resolvedPriority,
           ai_confidence: confidence,
           ai_draft: generatedDraft,
           ai_processed_at: new Date().toISOString(),
@@ -255,7 +339,7 @@ export default function Dashboard() {
               category: toTitleCase(aiCategory),
               sentiment: toTitleCase(sentiment),
               aiCategory: toTitleCase(aiCategory),
-              priority: toTitleCase(aiPriority),
+              priority: toTitleCase(resolvedPriority),
               confidence,
               aiDraft: generatedDraft
             }

@@ -4,7 +4,7 @@ MagentIQ technical demo project.
 ## Architecture Summary
 - Frontend: React + Vite + Tailwind
 - Data/Auth: Supabase (`messages`, `admin_profiles`)
-- AI Orchestration: n8n webhook (`SupportIQ.json`) + Gemini analysis
+- AI Orchestration: n8n webhook (`SupportIQ.json`) + Groq analysis
 - Email:
   - Manual path: frontend EmailJS (`Send Response` button)
   - Auto path: n8n policy branch calls EmailJS API
@@ -61,12 +61,11 @@ Safety guardrails:
 - `EMAILJS_TEMPLATE_ID`
 - `EMAILJS_PUBLIC_KEY`
 
-### n8n credential setup for Gemini
+### n8n runtime secrets for Groq
 - Node: `HTTP Request` (AI call)
-- URL: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent`
-- Auth: `Header Auth`
-- Header name: `x-goog-api-key`
-- Header value: `<GEMINI_API_KEY>`
+- URL: `https://api.groq.com/openai/v1/chat/completions`
+- Header: `Authorization: Bearer <GROQ_API_KEY>`
+- In n8n environment, set: `GROQ_API_KEY=<your_key>`
 - Keep body in JSON mode (workflow import already includes required schema + prompt).
 
 ## Local Run

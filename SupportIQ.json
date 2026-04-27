@@ -1,283 +1,269 @@
 {
-    "name":  "SupportIQ",
-    "nodes":  [
-                  {
-                      "parameters":  {
-                                         "httpMethod":  "POST",
-                                         "path":  "supportiq-analyze",
-                                         "responseMode":  "responseNode",
-                                         "options":  {
-
-                                                     }
-                                     },
-                      "type":  "n8n-nodes-base.webhook",
-                      "typeVersion":  2.1,
-                      "position":  [
-                                       0,
-                                       0
-                                   ],
-                      "id":  "a1a04b5b-2a1a-4071-8f86-4ed69fb4be28",
-                      "name":  "Webhook",
-                      "webhookId":  "f7610df4-752e-40a9-a24d-6a7f5d04ea6d"
-                  },
-                  {
-                      "parameters":  {
-                                         "method":  "POST",
-                                         "url":  "https://api.groq.com/openai/v1/chat/completions",
-                                         "authentication":  "none",
-                                         "sendHeaders":  true,
-                                         "headerParameters":  {
-                                                                  "parameters":  [
-                                                                                     {
-                                                                                         "name":  "Authorization",
-                                                                                         "value":  "=Bearer {{$env.GROQ_API_KEY}}"
-                                                                                     },
-                                                                                     {
-                                                                                         "name":  "Content-Type",
-                                                                                         "value":  "application/json"
-                                                                                     }
-                                                                                 ]
-                                                              },
-                                         "sendBody":  true,
-                                         "specifyBody":  "json",
-                                         "jsonBody":  "={\n  \"model\": \"openai/gpt-oss-20b\",\n  \"temperature\": 0.2,\n  \"response_format\": {\n    \"type\": \"json_object\"\n  },\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are SupportIQ-Triage, a strict customer-support triage model. Analyze one support ticket and return ONLY valid JSON with this exact schema: { \\\"sentiment\\\": \\\"frustrated\\\" | \\\"neutral\\\" | \\\"happy\\\", \\\"category\\\": \\\"technical\\\" | \\\"billing\\\" | \\\"feedback\\\" | \\\"other\\\", \\\"priority\\\": \\\"low\\\" | \\\"medium\\\" | \\\"high\\\", \\\"confidence\\\": \u003cinteger 0-100\u003e, \\\"draft_response\\\": \\\"\u003cprofessional customer reply\u003e\\\" }. Hard rules: Output JSON only with no markdown or explanation; use only allowed lowercase enums; confidence must be integer 0-100; if uncertain lower confidence; draft_response must be concise, empathetic, action-oriented, and under 120 words; never promise refunds, credits, or timelines unless explicit; if message is unclear ask one clarifying question in draft_response.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Ticket input:\\nticketId: {{$json.body.ticketId}}\\nfirstName: {{$json.body.firstName}}\\nlastName: {{$json.body.lastName}}\\nemail: {{$json.body.email}}\\nmessage: {{$json.body.message}}\"\n    }\n  ]\n}",
-                                         "options":  {
-
-                                                     }
-                                     },
-                      "type":  "n8n-nodes-base.httpRequest",
-                      "typeVersion":  4.4,
-                      "position":  [
-                                       220,
-                                       0
-                                   ],
-                      "id":  "c8ed298b-493d-4fbf-9036-7601847fd939",
-                      "name":  "HTTP Request",
-                      "continueOnFail":  true,
-                      "retryOnFail":  true,
-                      "maxTries":  5,
-                      "waitBetweenTries":  2000
-                  },
-                  {
-                      "parameters":  {
-                                         "jsCode":  "const body = $(\u0027Webhook\u0027).first().json.body || {};\n\nconst validSentiments = new Set([\u0027frustrated\u0027, \u0027neutral\u0027, \u0027happy\u0027]);\nconst validCategories = new Set([\u0027technical\u0027, \u0027billing\u0027, \u0027feedback\u0027, \u0027other\u0027]);\nconst validPriorities = new Set([\u0027low\u0027, \u0027medium\u0027, \u0027high\u0027]);\nconst fallbackDraft = \u0027Thank you for contacting SupportIQ. We received your ticket and a support agent will follow up shortly.\u0027;\n\nconst hasCandidate = Boolean($json?.choices?.[0]?.message?.content);\nlet upstreamError =\n  $json?.error?.message ||\n  $json?.message ||\n  (Array.isArray($json?.errors) \u0026\u0026 $json.errors[0]?.message) ||\n  null;\n\nlet raw = hasCandidate ? ($json.choices?.[0]?.message?.content ?? \u0027{}\u0027) : \u0027{}\u0027;\nif (typeof raw !== \u0027string\u0027) {\n  raw = JSON.stringify(raw ?? {});\n}\nraw = raw.replace(/^```json\\s*/i, \u0027\u0027).replace(/^```\\s*/i, \u0027\u0027).replace(/\\s*```$/i, \u0027\u0027).trim();\n\nlet parseFailed = false;\nlet parsed = {};\n\nif (!upstreamError) {\n  try {\n    parsed = JSON.parse(raw || \u0027{}\u0027);\n  } catch {\n    parseFailed = true;\n    parsed = {};\n  }\n} else {\n  parseFailed = true;\n}\n\nif (!upstreamError \u0026\u0026 !hasCandidate) {\n  upstreamError = \u0027Groq returned no choices content.\u0027;\n}\n\nif (!upstreamError \u0026\u0026 parseFailed) {\n  upstreamError = \u0027Invalid AI JSON output.\u0027;\n}\n\nconst sentiment = typeof parsed.sentiment === \u0027string\u0027 ? parsed.sentiment.toLowerCase().trim() : \u0027neutral\u0027;\nconst category = typeof parsed.category === \u0027string\u0027 ? parsed.category.toLowerCase().trim() : \u0027other\u0027;\nconst priority = typeof parsed.priority === \u0027string\u0027 ? parsed.priority.toLowerCase().trim() : \u0027medium\u0027;\n\nconst normalizedSentiment = validSentiments.has(sentiment) ? sentiment : \u0027neutral\u0027;\nconst normalizedCategory = validCategories.has(category) ? category : \u0027other\u0027;\nconst normalizedPriority = validPriorities.has(priority) ? priority : \u0027medium\u0027;\n\nconst confidenceRaw = Number(parsed.confidence);\nconst confidence = Number.isFinite(confidenceRaw)\n  ? Math.max(0, Math.min(100, Math.round(confidenceRaw)))\n  : 0;\nconst draft_response = typeof parsed.draft_response === \u0027string\u0027 \u0026\u0026 parsed.draft_response.trim()\n  ? parsed.draft_response.trim()\n  : fallbackDraft;\n\nconst needsHuman =\n  Boolean(upstreamError) ||\n  normalizedPriority === \u0027high\u0027 ||\n  confidence \u003c 85 ||\n  normalizedCategory === \u0027billing\u0027;\n\nreturn [\n  {\n    json: {\n      ticket_id: body.ticketId || null,\n      first_name: body.firstName || \u0027\u0027,\n      last_name: body.lastName || \u0027\u0027,\n      email: body.email || \u0027\u0027,\n      message: body.message || \u0027\u0027,\n      sentiment: normalizedSentiment,\n      category: normalizedCategory,\n      priority: normalizedPriority,\n      confidence,\n      draft_response,\n      parse_failed: parseFailed,\n      route_action: needsHuman ? \u0027needs_human\u0027 : \u0027auto_send\u0027,\n      status: needsHuman ? \u0027needs_human\u0027 : \u0027ai_ready\u0027,\n      auto_sent: false,\n      responded_at: null,\n      final_response: null,\n      email_error: null,\n      ai_error: upstreamError,\n      raw_model_output: raw\n    }\n  }\n];"
-                                     },
-                      "type":  "n8n-nodes-base.code",
-                      "typeVersion":  2,
-                      "position":  [
-                                       440,
-                                       0
-                                   ],
-                      "id":  "23792f7e-529d-4b44-b9d7-31ff71ef5ea7",
-                      "name":  "Build AI Analysis + Policy"
-                  },
-                  {
-                      "parameters":  {
-                                         "conditions":  {
-                                                            "options":  {
-                                                                            "caseSensitive":  true,
-                                                                            "leftValue":  "",
-                                                                            "typeValidation":  "strict",
-                                                                            "version":  2
-                                                                        },
-                                                            "conditions":  [
-                                                                               {
-                                                                                   "leftValue":  "={{ $json.route_action }}",
-                                                                                   "rightValue":  "auto_send",
-                                                                                   "operator":  {
-                                                                                                    "type":  "string",
-                                                                                                    "operation":  "equals"
-                                                                                                }
-                                                                               }
-                                                                           ],
-                                                            "combinator":  "and"
-                                                        },
-                                         "options":  {
-
-                                                     }
-                                     },
-                      "type":  "n8n-nodes-base.if",
-                      "typeVersion":  2.2,
-                      "position":  [
-                                       660,
-                                       0
-                                   ],
-                      "id":  "c5c0d20f-20f9-4d51-a32c-390e79ba3b40",
-                      "name":  "Route Auto Send"
-                  },
-                  {
-                      "parameters":  {
-                                         "method":  "POST",
-                                         "url":  "https://api.emailjs.com/api/v1.0/email/send",
-                                         "sendHeaders":  true,
-                                         "headerParameters":  {
-                                                                  "parameters":  [
-                                                                                     {
-                                                                                         "name":  "Content-Type",
-                                                                                         "value":  "application/json"
-                                                                                     }
-                                                                                 ]
-                                                              },
-                                         "sendBody":  true,
-                                         "specifyBody":  "json",
-                                         "jsonBody":  "={\n  \"service_id\": \"service_ljxfr6s\",\n  \"template_id\": \"template_58o1ak3\",\n  \"user_id\": \"C5AQ10eBm9tuz4jLD\",\n  \"template_params\": {\n    \"to_email\": \"{{$json.email}}\",\n    \"to_name\": \"{{$json.first_name}} {{$json.last_name}}\",\n    \"ticket_id\": \"{{$json.ticket_id}}\",\n    \"ai_category\": \"{{$json.category}}\",\n    \"sentiment\": \"{{$json.sentiment}}\",\n    \"response_message\": \"{{$json.draft_response}}\"\n  }\n}",
-                                         "options":  {
-
-                                                     }
-                                     },
-                      "type":  "n8n-nodes-base.httpRequest",
-                      "typeVersion":  4.4,
-                      "position":  [
-                                       880,
-                                       -100
-                                   ],
-                      "id":  "cf16e586-a2e9-40d8-b7bb-9a0d8c2fc934",
-                      "name":  "EmailJS Send",
-                      "continueOnFail":  true
-                  },
-                  {
-                      "parameters":  {
-                                         "jsCode":  "const analysis = $items(\u0027Build AI Analysis + Policy\u0027, 0, 0)?.[0]?.json || {};\nconst emailResult = $json ?? null;\n\nconst asString = typeof emailResult === \u0027string\u0027\n  ? emailResult\n  : (typeof emailResult?.body === \u0027string\u0027 ? emailResult.body : \u0027\u0027);\n\nconst statusCodeRaw = Number(\n  emailResult?.statusCode ??\n  emailResult?.status ??\n  emailResult?.code ??\n  NaN\n);\nconst statusCode = Number.isFinite(statusCodeRaw) ? statusCodeRaw : null;\n\nconst explicitError =\n  emailResult?.error?.message ||\n  emailResult?.error ||\n  emailResult?.message ||\n  null;\n\nconst normalizedBody = asString.trim().toLowerCase();\nconst bodyLooksOk = normalizedBody === \u0027ok\u0027 || normalizedBody === \u0027success\u0027;\nconst has2xx = statusCode !== null \u0026\u0026 statusCode \u003e= 200 \u0026\u0026 statusCode \u003c 300;\nconst explicitSuccess =\n  emailResult?.ok === true ||\n  emailResult?.success === true ||\n  emailResult?.status === \u0027OK\u0027 ||\n  emailResult?.statusText === \u0027OK\u0027;\n\n// n8n HTTP Request with continueOnFail usually exposes explicit error details on failure.\n// If we have no explicit error, treat it as success to avoid false negatives from body shape differences.\nconst hasAnyErrorSignal = Boolean(explicitError) || (statusCode !== null \u0026\u0026 statusCode \u003e= 400);\nconst isSuccess = !hasAnyErrorSignal || bodyLooksOk || has2xx || explicitSuccess;\n\nif (!isSuccess) {\n  const fallbackError =\n    explicitError ||\n    (statusCode !== null ? `Email send failed (${statusCode})` : null) ||\n    (asString ? `Email send failed (${asString.slice(0, 140)})` : null) ||\n    \u0027Email send failed: no success acknowledgment from EmailJS.\u0027;\n\n  return [\n    {\n      json: {\n        ...analysis,\n        route_action: \u0027needs_human\u0027,\n        status: \u0027needs_human\u0027,\n        auto_sent: false,\n        responded_at: null,\n        final_response: null,\n        email_error: fallbackError\n      }\n    }\n  ];\n}\n\nreturn [\n  {\n    json: {\n      ...analysis,\n      route_action: \u0027auto_send\u0027,\n      status: \u0027responded\u0027,\n      auto_sent: true,\n      responded_at: new Date().toISOString(),\n      final_response: analysis.draft_response || \u0027\u0027,\n      email_error: null\n    }\n  }\n];"
-                                     },
-                      "type":  "n8n-nodes-base.code",
-                      "typeVersion":  2,
-                      "position":  [
-                                       1100,
-                                       -100
-                                   ],
-                      "id":  "09a63c8f-c328-4f8a-88ea-f26e5eaf3f31",
-                      "name":  "Finalize Auto Send"
-                  },
-                  {
-                      "parameters":  {
-                                         "jsCode":  "const analysis = $json || {};\nreturn [\n  {\n    json: {\n      ...analysis,\n      route_action: \u0027needs_human\u0027,\n      status: \u0027needs_human\u0027,\n      auto_sent: false,\n      responded_at: null,\n      final_response: null,\n      email_error: analysis.email_error || null\n    }\n  }\n];\n"
-                                     },
-                      "type":  "n8n-nodes-base.code",
-                      "typeVersion":  2,
-                      "position":  [
-                                       880,
-                                       120
-                                   ],
-                      "id":  "7eef7f8d-67bf-4d70-bf46-1130a93ec385",
-                      "name":  "Finalize Needs Human"
-                  },
-                  {
-                      "parameters":  {
-                                         "options":  {
-
-                                                     }
-                                     },
-                      "type":  "n8n-nodes-base.respondToWebhook",
-                      "typeVersion":  1.5,
-                      "position":  [
-                                       1320,
-                                       0
-                                   ],
-                      "id":  "81536771-7e8d-4e17-853f-01571bfc9ed8",
-                      "name":  "Respond to Webhook"
-                  }
-              ],
-    "pinData":  {
-
-                },
-    "connections":  {
-                        "Webhook":  {
-                                        "main":  [
-                                                     [
-                                                         {
-                                                             "node":  "HTTP Request",
-                                                             "type":  "main",
-                                                             "index":  0
-                                                         }
-                                                     ]
-                                                 ]
-                                    },
-                        "HTTP Request":  {
-                                             "main":  [
-                                                          [
-                                                              {
-                                                                  "node":  "Build AI Analysis + Policy",
-                                                                  "type":  "main",
-                                                                  "index":  0
-                                                              }
-                                                          ]
-                                                      ]
-                                         },
-                        "Build AI Analysis + Policy":  {
-                                                           "main":  [
-                                                                        [
-                                                                            {
-                                                                                "node":  "Route Auto Send",
-                                                                                "type":  "main",
-                                                                                "index":  0
-                                                                            }
-                                                                        ]
-                                                                    ]
-                                                       },
-                        "Route Auto Send":  {
-                                                "main":  [
-                                                             [
-                                                                 {
-                                                                     "node":  "EmailJS Send",
-                                                                     "type":  "main",
-                                                                     "index":  0
-                                                                 }
-                                                             ],
-                                                             [
-                                                                 {
-                                                                     "node":  "Finalize Needs Human",
-                                                                     "type":  "main",
-                                                                     "index":  0
-                                                                 }
-                                                             ]
-                                                         ]
-                                            },
-                        "EmailJS Send":  {
-                                             "main":  [
-                                                          [
-                                                              {
-                                                                  "node":  "Finalize Auto Send",
-                                                                  "type":  "main",
-                                                                  "index":  0
-                                                              }
-                                                          ]
-                                                      ]
-                                         },
-                        "Finalize Auto Send":  {
-                                                   "main":  [
-                                                                [
-                                                                    {
-                                                                        "node":  "Respond to Webhook",
-                                                                        "type":  "main",
-                                                                        "index":  0
-                                                                    }
-                                                                ]
-                                                            ]
-                                               },
-                        "Finalize Needs Human":  {
-                                                     "main":  [
-                                                                  [
-                                                                      {
-                                                                          "node":  "Respond to Webhook",
-                                                                          "type":  "main",
-                                                                          "index":  0
-                                                                      }
-                                                                  ]
-                                                              ]
-                                                 }
-                    },
-    "active":  true,
-    "settings":  {
-                     "executionOrder":  "v1",
-                     "binaryMode":  "separate"
-                 },
-    "versionId":  "b01b2efe-15ae-4971-afa8-c5696d2b6a99",
-    "meta":  {
-                 "instanceId":  "73307eb5d8a8d1338ec1c03c9cad3a9c94ea07b0f0a751e368083f586fc7e42d"
-             },
-    "id":  "xTWrWlBsWTE5eoAy",
-    "tags":  [
-
-             ]
+  "name": "SupportIQ",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "supportiq-analyze",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        144,
+        688
+      ],
+      "id": "4919d477-7d74-4bc5-9de2-2cb05cf5366e",
+      "name": "Webhook",
+      "webhookId": "f7610df4-752e-40a9-a24d-6a7f5d04ea6d"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.groq.com/openai/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer REPLACE_WITH_GROQ_API_KEY"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"openai/gpt-oss-20b\",\n  \"temperature\": 0.2,\n  \"response_format\": {\n    \"type\": \"json_object\"\n  },\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are SupportIQ-Triage, a strict customer-support triage model. Analyze one support ticket and return ONLY valid JSON with this exact schema: { \\\"sentiment\\\": \\\"frustrated\\\" | \\\"neutral\\\" | \\\"happy\\\", \\\"category\\\": \\\"technical\\\" | \\\"billing\\\" | \\\"feedback\\\" | \\\"other\\\", \\\"priority\\\": \\\"low\\\" | \\\"medium\\\" | \\\"high\\\", \\\"confidence\\\": <integer 0-100>, \\\"draft_response\\\": \\\"<professional customer reply>\\\" }. Hard rules: Output JSON only with no markdown or explanation; use only allowed lowercase enums; confidence must be integer 0-100; if uncertain lower confidence; draft_response must be concise, empathetic, action-oriented, and under 120 words; never promise refunds, credits, or timelines unless explicit; if message is unclear ask one clarifying question in draft_response.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Ticket input:\\nticketId: {{$json.body.ticketId}}\\nfirstName: {{$json.body.firstName}}\\nlastName: {{$json.body.lastName}}\\nemail: {{$json.body.email}}\\nmessage: {{$json.body.message}}\"\n    }\n  ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        368,
+        688
+      ],
+      "id": "14274a15-49c5-439e-8807-2c502e2a990f",
+      "name": "HTTP Request",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 2000,
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $('Webhook').first().json.body || {};\n\nconst validSentiments = new Set(['frustrated', 'neutral', 'happy']);\nconst validCategories = new Set(['technical', 'billing', 'feedback', 'other']);\nconst validPriorities = new Set(['low', 'medium', 'high']);\nconst fallbackDraft = 'Thank you for contacting SupportIQ. We received your ticket and a support agent will follow up shortly.';\n\nconst payload =\n  $json?.body && typeof $json.body === 'object'\n    ? $json.body\n    : $json;\n\nconst hasGroqChoice = Boolean(payload?.choices?.[0]?.message?.content);\nconst hasGeminiCandidate = Boolean(payload?.candidates?.[0]?.content?.parts?.[0]?.text);\nconst hasCandidate = hasGroqChoice || hasGeminiCandidate;\n\nlet upstreamError =\n  payload?.error?.message ||\n  payload?.message ||\n  (Array.isArray(payload?.errors) && payload.errors[0]?.message) ||\n  $json?.error?.message ||\n  $json?.message ||\n  (Array.isArray($json?.errors) && $json.errors[0]?.message) ||\n  null;\n\nlet raw = hasGroqChoice\n  ? (payload.choices?.[0]?.message?.content ?? '{}')\n  : hasGeminiCandidate\n    ? (payload.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}')\n    : '{}';\n\nif (typeof raw !== 'string') {\n  raw = JSON.stringify(raw ?? {});\n}\nraw = raw.replace(/^```json\\s*/i, '').replace(/^```\\s*/i, '').replace(/\\s*```$/i, '').trim();\n\nlet parseFailed = false;\nlet parsed = {};\n\nif (!upstreamError) {\n  try {\n    parsed = JSON.parse(raw || '{}');\n  } catch {\n    parseFailed = true;\n    parsed = {};\n  }\n} else {\n  parseFailed = true;\n}\n\nif (!upstreamError && !hasCandidate) {\n  const finishReason = payload?.choices?.[0]?.finish_reason || null;\n  upstreamError = finishReason\n    ? `AI returned empty content (finish_reason: ${finishReason}).`\n    : 'AI returned no candidate content.';\n}\n\nif (!upstreamError && parseFailed) {\n  upstreamError = 'Invalid AI JSON output.';\n}\n\nconst sentiment = typeof parsed.sentiment === 'string' ? parsed.sentiment.toLowerCase().trim() : 'neutral';\nconst category = typeof parsed.category === 'string' ? parsed.category.toLowerCase().trim() : 'other';\nconst priority = typeof parsed.priority === 'string' ? parsed.priority.toLowerCase().trim() : 'medium';\n\nconst normalizedSentiment = validSentiments.has(sentiment) ? sentiment : 'neutral';\nconst normalizedCategory = validCategories.has(category) ? category : 'other';\nconst normalizedPriority = validPriorities.has(priority) ? priority : 'medium';\n\nconst confidenceRaw = Number(parsed.confidence);\nconst confidence = Number.isFinite(confidenceRaw)\n  ? Math.max(0, Math.min(100, Math.round(confidenceRaw)))\n  : 0;\nconst draft_response = typeof parsed.draft_response === 'string' && parsed.draft_response.trim()\n  ? parsed.draft_response.trim()\n  : fallbackDraft;\n\nconst needsHuman =\n  Boolean(upstreamError) ||\n  normalizedPriority === 'high' ||\n  confidence < 85 ||\n  normalizedCategory === 'billing';\n\nreturn [\n  {\n    json: {\n      ticket_id: body.ticketId || null,\n      first_name: body.firstName || '',\n      last_name: body.lastName || '',\n      email: body.email || '',\n      message: body.message || '',\n      sentiment: normalizedSentiment,\n      category: normalizedCategory,\n      priority: normalizedPriority,\n      confidence,\n      draft_response,\n      parse_failed: parseFailed,\n      route_action: needsHuman ? 'needs_human' : 'auto_send',\n      status: needsHuman ? 'needs_human' : 'ai_ready',\n      auto_sent: false,\n      responded_at: null,\n      final_response: null,\n      email_error: null,\n      ai_error: upstreamError,\n      raw_model_output: raw\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        592,
+        688
+      ],
+      "id": "a4f6966e-2597-45c1-92ce-db2bda60258f",
+      "name": "Build AI Analysis + Policy"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.route_action }}",
+              "rightValue": "auto_send",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        816,
+        688
+      ],
+      "id": "a64c2717-4904-4ebf-8dc4-4ea6487606b7",
+      "name": "Route Auto Send"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.emailjs.com/api/v1.0/email/send",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"service_id\": \"service_ljxfr6s\",\n  \"template_id\": \"template_58o1ak3\",\n  \"user_id\": \"C5AQ10eBm9tuz4jLD\",\n  \"accessToken\": \"REPLACE_WITH_EMAILJS_PRIVATE_KEY\",\n  \"template_params\": {\n    \"to_email\": \"{{$json.email}}\",\n    \"to_name\": \"{{$json.first_name}} {{$json.last_name}}\",\n    \"ticket_id\": \"{{$json.ticket_id}}\",\n    \"ai_category\": \"{{$json.category}}\",\n    \"sentiment\": \"{{$json.sentiment}}\",\n    \"response_message\": \"{{$json.draft_response}}\"\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1024,
+        576
+      ],
+      "id": "ab23e058-a40d-4cfa-8c40-ba4b887a21b5",
+      "name": "EmailJS Send",
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const analysis = $items('Build AI Analysis + Policy', 0, 0)?.[0]?.json || {};\nconst emailResult = $json ?? null;\n\nconst asString = typeof emailResult === 'string'\n  ? emailResult\n  : (typeof emailResult?.body === 'string' ? emailResult.body : '');\n\nconst statusCodeRaw = Number(\n  emailResult?.statusCode ??\n  emailResult?.status ??\n  emailResult?.code ??\n  NaN\n);\nconst statusCode = Number.isFinite(statusCodeRaw) ? statusCodeRaw : null;\n\nconst explicitError =\n  emailResult?.error?.message ||\n  emailResult?.error ||\n  emailResult?.message ||\n  null;\n\nconst normalizedBody = asString.trim().toLowerCase();\nconst bodyLooksOk = normalizedBody === 'ok' || normalizedBody === 'success';\nconst has2xx = statusCode !== null && statusCode >= 200 && statusCode < 300;\nconst explicitSuccess =\n  emailResult?.ok === true ||\n  emailResult?.success === true ||\n  emailResult?.status === 'OK' ||\n  emailResult?.statusText === 'OK';\n\n// n8n HTTP Request with continueOnFail usually exposes explicit error details on failure.\n// If we have no explicit error, treat it as success to avoid false negatives from body shape differences.\nconst hasAnyErrorSignal = Boolean(explicitError) || (statusCode !== null && statusCode >= 400);\nconst isSuccess = !hasAnyErrorSignal || bodyLooksOk || has2xx || explicitSuccess;\n\nif (!isSuccess) {\n  const fallbackError =\n    explicitError ||\n    (statusCode !== null ? `Email send failed (${statusCode})` : null) ||\n    (asString ? `Email send failed (${asString.slice(0, 140)})` : null) ||\n    'Email send failed: no success acknowledgment from EmailJS.';\n\n  return [\n    {\n      json: {\n        ...analysis,\n        route_action: 'needs_human',\n        status: 'needs_human',\n        auto_sent: false,\n        responded_at: null,\n        final_response: null,\n        email_error: fallbackError\n      }\n    }\n  ];\n}\n\nreturn [\n  {\n    json: {\n      ...analysis,\n      route_action: 'auto_send',\n      status: 'responded',\n      auto_sent: true,\n      responded_at: new Date().toISOString(),\n      final_response: analysis.draft_response || '',\n      email_error: null\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1248,
+        576
+      ],
+      "id": "3fbaeedb-8557-4298-9618-107892bc73e1",
+      "name": "Finalize Auto Send"
+    },
+    {
+      "parameters": {
+        "jsCode": "const analysis = $json || {};\nreturn [\n  {\n    json: {\n      ...analysis,\n      route_action: 'needs_human',\n      status: 'needs_human',\n      auto_sent: false,\n      responded_at: null,\n      final_response: null,\n      email_error: analysis.email_error || null\n    }\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1024,
+        800
+      ],
+      "id": "6dddb832-a6ff-49b7-a6fd-d952ef4b301a",
+      "name": "Finalize Needs Human"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1472,
+        688
+      ],
+      "id": "545e0260-c873-4b76-a53c-642b93e657dd",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Build AI Analysis + Policy",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build AI Analysis + Policy": {
+      "main": [
+        [
+          {
+            "node": "Route Auto Send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Auto Send": {
+      "main": [
+        [
+          {
+            "node": "EmailJS Send",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Finalize Needs Human",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EmailJS Send": {
+      "main": [
+        [
+          {
+            "node": "Finalize Auto Send",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finalize Auto Send": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Finalize Needs Human": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "6227678d-064e-43f9-96f6-d228db93094b",
+  "meta": {
+    "instanceId": "73307eb5d8a8d1338ec1c03c9cad3a9c94ea07b0f0a751e368083f586fc7e42d"
+  },
+  "id": "xTWrWlBsWTE5eoAy",
+  "tags": []
 }
+
 

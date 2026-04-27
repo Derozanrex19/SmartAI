@@ -122,7 +122,7 @@
                                                               },
                                          "sendBody":  true,
                                          "specifyBody":  "json",
-                                         "jsonBody":  "={\n  \"service_id\": \"{{$env.EMAILJS_SERVICE_ID}}\",\n  \"template_id\": \"{{$env.EMAILJS_TEMPLATE_ID}}\",\n  \"user_id\": \"{{$env.EMAILJS_PUBLIC_KEY}}\",\n  \"template_params\": {\n    \"to_email\": \"{{$json.email}}\",\n    \"to_name\": \"{{$json.first_name}} {{$json.last_name}}\",\n    \"ticket_id\": \"{{$json.ticket_id}}\",\n    \"ai_category\": \"{{$json.category}}\",\n    \"sentiment\": \"{{$json.sentiment}}\",\n    \"response_message\": \"{{$json.draft_response}}\"\n  }\n}\n",
+                                         "jsonBody":  "={\n  \"service_id\": \"service_ljxfr6s\",\n  \"template_id\": \"template_58o1ak3\",\n  \"user_id\": \"C5AQ10eBm9tuz4jLD\",\n  \"template_params\": {\n    \"to_email\": \"{{$json.email}}\",\n    \"to_name\": \"{{$json.first_name}} {{$json.last_name}}\",\n    \"ticket_id\": \"{{$json.ticket_id}}\",\n    \"ai_category\": \"{{$json.category}}\",\n    \"sentiment\": \"{{$json.sentiment}}\",\n    \"response_message\": \"{{$json.draft_response}}\"\n  }\n}",
                                          "options":  {
 
                                                      }

@@ -78,6 +78,8 @@ const VALID_SENTIMENTS = ['frustrated', 'neutral', 'happy'] as const;
 const VALID_PRIORITIES = ['low', 'medium', 'high'] as const;
 const VALID_STATUSES = ['new', 'ai_ready', 'needs_human', 'responded', 'ai_generating'] as const;
 const FALLBACK_DRAFT = 'Thanks for contacting SupportIQ. Our team will review your ticket and respond shortly.';
+const AI_REQUEST_TIMEOUT_MS = 60000;
+const AI_TIMEOUT_COOLDOWN_MS = 30000;
 
 function normalizeCategory(value: string | undefined, fallbackMessage: string): string {
   const raw = (value || '').trim().toLowerCase();
@@ -245,6 +247,8 @@ export default function Dashboard() {
   const [searchTerm, setSearchTerm] = useState('');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const inFlightGenerationRef = useRef<Set<string>>(new Set());
+  const generationCooldownRef = useRef<Map<string, number>>(new Map());
+  const [cooldownTick, setCooldownTick] = useState(() => Date.now());
   const [generatingTicketId, setGeneratingTicketId] = useState<string | null>(null);
   const navigate = useNavigate();
 
@@ -309,6 +313,27 @@ export default function Dashboard() {
     loadMessages();
   }, []);
 
+  useEffect(() => {
+    const timerId = window.setInterval(() => {
+      setCooldownTick(Date.now());
+    }, 1000);
+
+    return () => window.clearInterval(timerId);
+  }, []);
+
+  const getCooldownRemainingSeconds = (ticketId: string): number => {
+    const expiresAt = generationCooldownRef.current.get(ticketId);
+    if (!expiresAt) return 0;
+
+    const remainingMs = expiresAt - cooldownTick;
+    if (remainingMs <= 0) {
+      generationCooldownRef.current.delete(ticketId);
+      return 0;
+    }
+
+    return Math.ceil(remainingMs / 1000);
+  };
+
   const filteredMessages = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
     if (!term) return messages;
@@ -334,6 +359,11 @@ export default function Dashboard() {
       setModalError('Missing VITE_N8N_WEBHOOK_URL in your environment config.');
       return;
     }
+    const cooldownSeconds = getCooldownRemainingSeconds(message.id);
+    if (cooldownSeconds > 0) {
+      setModalError(`AI is cooling down for this ticket after timeout. Retry in ${cooldownSeconds}s.`);
+      return;
+    }
 
     inFlightGenerationRef.current.add(message.id);
     setIsGenerating(true);
@@ -351,8 +381,9 @@ export default function Dashboard() {
 
     try {
       const controller = new AbortController();
-      const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+      const timeoutId = window.setTimeout(() => controller.abort(), AI_REQUEST_TIMEOUT_MS);
       let aiData: AiWebhookResponse;
+      let didTimeout = false;
 
       try {
         const response = await fetch(n8nWebhookUrl, {
@@ -387,6 +418,7 @@ export default function Dashboard() {
         }
       } catch (fetchError) {
         if (fetchError instanceof DOMException && fetchError.name === 'AbortError') {
+          didTimeout = true;
           aiData = buildFallbackAiResponse('AI request timed out. Routed to manual review.');
         } else {
           aiData = buildFallbackAiResponse(
@@ -415,6 +447,10 @@ export default function Dashboard() {
       const finalResponse = shouldMarkResponded
         ? (aiData.final_response || message.finalResponse || resolvedDraft)
         : null;
+
+      if (didTimeout) {
+        generationCooldownRef.current.set(message.id, Date.now() + AI_TIMEOUT_COOLDOWN_MS);
+      }
 
       const { error: updateError } = await supabase
         .from('messages')
@@ -460,7 +496,14 @@ export default function Dashboard() {
         const fallbackMessage = trigger === 'auto'
           ? `Auto-generation degraded: ${readableError}`
           : `Generation degraded: ${readableError}`;
-        setModalError(fallbackMessage);
+        if (didTimeout) {
+          const cooldownSecondsAfterTimeout = getCooldownRemainingSeconds(message.id);
+          setModalError(
+            `${fallbackMessage} Please wait ${cooldownSecondsAfterTimeout}s before retrying this ticket.`
+          );
+        } else {
+          setModalError(fallbackMessage);
+        }
       } else if (aiData.email_error && trigger === 'auto') {
         setModalError(`AI draft generated, but auto-send failed: ${aiData.email_error}`);
       }
@@ -605,6 +648,7 @@ export default function Dashboard() {
             (selectedMessage.priority && selectedMessage.priority !== 'Pending')
         )
       : false;
+  const selectedTicketCooldownSeconds = selectedMessage ? getCooldownRemainingSeconds(selectedMessage.id) : 0;
 
   return (
     <div className="min-h-screen flex flex-col bg-bg-dark">
@@ -778,7 +822,7 @@ export default function Dashboard() {
                     </h4>
                     <button
                       onClick={handleGenerateResponse}
-                      disabled={isGenerating}
+                      disabled={isGenerating || selectedTicketCooldownSeconds > 0}
                       className="ai-generate-btn"
                     >
                       <svg
@@ -792,7 +836,13 @@ export default function Dashboard() {
                         <path d="M10,21.236,6.755,14.745.264,11.5,6.755,8.255,10,1.764l3.245,6.491L19.736,11.5l-6.491,3.245ZM18,21l1.5,3L21,21l3-1.5L21,18l-1.5-3L18,18l-3,1.5ZM19.333,4.667,20.5,7l1.167-2.333L24,3.5,21.667,2.333,20.5,0,19.333,2.333,17,3.5Z" />
                       </svg>
                       <span className="ai-generate-text">
-                        {isGenerating && generatingTicketId === selectedMessage.id ? 'Generating...' : hasAiOutput ? 'Re-Generate' : 'Generate'}
+                        {isGenerating && generatingTicketId === selectedMessage.id
+                          ? 'Generating...'
+                          : selectedTicketCooldownSeconds > 0
+                            ? `Retry in ${selectedTicketCooldownSeconds}s`
+                            : hasAiOutput
+                              ? 'Re-Generate'
+                              : 'Generate'}
                       </span>
                     </button>
                   </div>

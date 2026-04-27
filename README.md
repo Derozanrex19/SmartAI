@@ -56,10 +56,19 @@ Safety guardrails:
 - `VITE_EMAILJS_TEMPLATE_ID`
 - `VITE_EMAILJS_PUBLIC_KEY`
 
-### n8n runtime secrets (for auto-send branch)
+### n8n runtime secrets (for AI + auto-send branches)
+- `OPENAI_API_KEY`
 - `EMAILJS_SERVICE_ID`
 - `EMAILJS_TEMPLATE_ID`
 - `EMAILJS_PUBLIC_KEY`
+
+### n8n credential setup for OpenAI
+- Node: `HTTP Request` (AI call)
+- URL: `https://api.openai.com/v1/chat/completions`
+- Auth: `Header Auth`
+- Header name: `Authorization`
+- Header value: `Bearer <OPENAI_API_KEY>`
+- Keep body in JSON mode (workflow import already includes required schema + prompt).
 
 ## Local Run
 1. Install dependencies:

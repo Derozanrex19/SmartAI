@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -10,7 +10,8 @@ import {
   Mail,
   Clock,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Trash2
 } from 'lucide-react';
 import type { User } from '@supabase/supabase-js';
 import emailjs from '@emailjs/browser';
@@ -54,6 +55,7 @@ interface UiMessage {
   confidence: number | null;
   aiDraft: string | null;
   finalResponse: string | null;
+  status: string;
 }
 
 interface AiWebhookResponse {
@@ -62,11 +64,20 @@ interface AiWebhookResponse {
   priority?: string;
   confidence?: number;
   draft_response?: string;
+  status?: string;
+  route_action?: string;
+  auto_sent?: boolean;
+  responded_at?: string | null;
+  final_response?: string | null;
+  email_error?: string | null;
+  ai_error?: string | null;
 }
 
 const VALID_CATEGORIES = ['technical', 'billing', 'feedback', 'other'] as const;
 const VALID_SENTIMENTS = ['frustrated', 'neutral', 'happy'] as const;
 const VALID_PRIORITIES = ['low', 'medium', 'high'] as const;
+const VALID_STATUSES = ['new', 'ai_ready', 'needs_human', 'responded', 'ai_generating'] as const;
+const FALLBACK_DRAFT = 'Thanks for contacting SupportIQ. Our team will review your ticket and respond shortly.';
 
 function normalizeCategory(value: string | undefined, fallbackMessage: string): string {
   const raw = (value || '').trim().toLowerCase();
@@ -96,6 +107,12 @@ function normalizePriority(value: string | undefined): string | null {
   const raw = (value || '').trim().toLowerCase();
   if ((VALID_PRIORITIES as readonly string[]).includes(raw)) return raw;
   return null;
+}
+
+function normalizeStatus(value: string | undefined, fallback: string): string {
+  const raw = (value || '').trim().toLowerCase();
+  if ((VALID_STATUSES as readonly string[]).includes(raw)) return raw;
+  return fallback;
 }
 
 function inferPriorityFromMessage(message: string, category?: string, sentiment?: string): string {
@@ -185,6 +202,35 @@ function toTitleCase(value: string) {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
+function buildFallbackAiResponse(reason: string): AiWebhookResponse {
+  return {
+    sentiment: 'neutral',
+    category: 'other',
+    priority: 'medium',
+    confidence: 0,
+    draft_response: FALLBACK_DRAFT,
+    status: 'needs_human',
+    route_action: 'needs_human',
+    auto_sent: false,
+    responded_at: null,
+    final_response: null,
+    email_error: null,
+    ai_error: reason
+  };
+}
+
+function formatAiFailureForDisplay(reason: string): string {
+  const normalized = reason.toLowerCase();
+  const isHighDemand =
+    /high demand|service unavailable|try again later|overload|overloaded|capacity|rate limit|too many requests|quota|resource exhausted|429|503/.test(normalized);
+
+  if (isHighDemand) {
+    return 'AI service is currently under high demand (capacity/rate-limit issue). Manual review is enabled for now. Please retry Generate shortly.';
+  }
+
+  return `AI failed: ${reason}`;
+}
+
 export default function Dashboard() {
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [selectedMessage, setSelectedMessage] = useState<UiMessage | null>(null);
@@ -192,11 +238,14 @@ export default function Dashboard() {
   const [loadError, setLoadError] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [aiDraft, setAiDraft] = useState('');
   const [status, setStatus] = useState<'idle' | 'sending' | 'sent'>('idle');
   const [modalError, setModalError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const inFlightGenerationRef = useRef<Set<string>>(new Set());
+  const [generatingTicketId, setGeneratingTicketId] = useState<string | null>(null);
   const navigate = useNavigate();
 
   const n8nWebhookUrl = import.meta.env.VITE_N8N_WEBHOOK_URL as string | undefined;
@@ -247,7 +296,8 @@ export default function Dashboard() {
         aiCategory: msg.ai_category ? toTitleCase(msg.ai_category) : null,
         confidence: msg.ai_confidence,
         aiDraft: msg.ai_draft,
-        finalResponse: msg.final_response
+        finalResponse: msg.final_response,
+        status: msg.status || 'new'
       };
     });
 
@@ -277,43 +327,94 @@ export default function Dashboard() {
     navigate('/login');
   };
 
-  const handleGenerateResponse = async () => {
-    if (!selectedMessage) return;
+  const runAiGeneration = async (message: UiMessage, trigger: 'auto' | 'manual') => {
+    if (inFlightGenerationRef.current.has(message.id)) return;
     setModalError('');
-
     if (!n8nWebhookUrl) {
       setModalError('Missing VITE_N8N_WEBHOOK_URL in your environment config.');
       return;
     }
 
+    inFlightGenerationRef.current.add(message.id);
     setIsGenerating(true);
+    setGeneratingTicketId(message.id);
 
     const payload = {
-      ticketId: selectedMessage.id,
-      firstName: selectedMessage.firstName,
-      lastName: selectedMessage.lastName,
-      email: selectedMessage.email,
+      ticketId: message.id,
+      firstName: message.firstName,
+      lastName: message.lastName,
+      email: message.email,
       category: 'unspecified',
       priority: 'unspecified',
-      message: selectedMessage.message
+      message: message.message
     };
 
     try {
-      const response = await fetch(n8nWebhookUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-      if (!response.ok) throw new Error(`Webhook call failed with status ${response.status}`);
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), 15000);
+      let aiData: AiWebhookResponse;
 
-      const aiData = await response.json() as AiWebhookResponse;
-      const sentiment = normalizeSentiment(aiData.sentiment, selectedMessage.message);
-      const aiCategory = normalizeCategory(aiData.category, selectedMessage.message);
+      try {
+        const response = await fetch(n8nWebhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: controller.signal
+        });
+
+        const rawResponse = await response.text();
+        let parsedResponse: AiWebhookResponse = {};
+
+        if (rawResponse.trim()) {
+          try {
+            parsedResponse = JSON.parse(rawResponse) as AiWebhookResponse;
+          } catch {
+            parsedResponse = buildFallbackAiResponse('AI workflow returned invalid JSON.');
+          }
+        } else {
+          parsedResponse = buildFallbackAiResponse('AI workflow returned an empty response.');
+        }
+
+        if (!response.ok) {
+          aiData = {
+            ...parsedResponse,
+            ...buildFallbackAiResponse(
+              parsedResponse.ai_error || parsedResponse.email_error || `Webhook call failed with status ${response.status}`
+            )
+          };
+        } else {
+          aiData = parsedResponse;
+        }
+      } catch (fetchError) {
+        if (fetchError instanceof DOMException && fetchError.name === 'AbortError') {
+          aiData = buildFallbackAiResponse('AI request timed out. Routed to manual review.');
+        } else {
+          aiData = buildFallbackAiResponse(
+            fetchError instanceof Error ? fetchError.message : 'AI workflow unavailable.'
+          );
+        }
+      } finally {
+        window.clearTimeout(timeoutId);
+      }
+
+      const sentiment = normalizeSentiment(aiData.sentiment, message.message);
+      const aiCategory = normalizeCategory(aiData.category, message.message);
       const aiPriority = normalizePriority(aiData.priority);
       const resolvedPriority =
-        aiPriority ?? inferPriorityFromMessage(selectedMessage.message, aiCategory, sentiment);
+        aiPriority ?? inferPriorityFromMessage(message.message, aiCategory, sentiment);
       const confidence = normalizeConfidence(aiData.confidence);
-      const generatedDraft = aiData.draft_response || '';
+      const generatedDraft = (aiData.draft_response || aiData.final_response || '').trim();
+      const resolvedDraft = generatedDraft || FALLBACK_DRAFT;
+      const defaultStatus = message.replied ? 'responded' : 'ai_ready';
+      const normalizedStatus = normalizeStatus(aiData.status, defaultStatus);
+      const shouldMarkResponded = message.replied || aiData.auto_sent === true || normalizedStatus === 'responded';
+      const resolvedStatus = shouldMarkResponded ? 'responded' : normalizedStatus;
+      const respondedAt = shouldMarkResponded
+        ? (aiData.responded_at || message.respondedAt || new Date().toISOString())
+        : null;
+      const finalResponse = shouldMarkResponded
+        ? (aiData.final_response || message.finalResponse || resolvedDraft)
+        : null;
 
       const { error: updateError } = await supabase
         .from('messages')
@@ -322,18 +423,22 @@ export default function Dashboard() {
           ai_category: aiCategory,
           ai_priority: resolvedPriority,
           ai_confidence: confidence,
-          ai_draft: generatedDraft,
+          ai_draft: resolvedDraft,
           ai_processed_at: new Date().toISOString(),
-          ai_error: null,
-          status: selectedMessage.replied ? 'responded' : 'ai_ready'
+          ai_error: aiData.ai_error || aiData.email_error || null,
+          status: resolvedStatus,
+          responded_at: respondedAt,
+          final_response: finalResponse
         })
-        .eq('ticket_id', selectedMessage.id);
+        .eq('ticket_id', message.id);
 
       if (updateError) throw new Error(updateError.message);
 
-      setAiDraft(generatedDraft);
+      if (selectedMessage?.id === message.id) {
+        setAiDraft(resolvedDraft);
+      }
       setSelectedMessage((current) =>
-        current
+        current && current.id === message.id
           ? {
               ...current,
               category: toTitleCase(aiCategory),
@@ -341,16 +446,44 @@ export default function Dashboard() {
               aiCategory: toTitleCase(aiCategory),
               priority: toTitleCase(resolvedPriority),
               confidence,
-              aiDraft: generatedDraft
+              aiDraft: resolvedDraft,
+              status: resolvedStatus,
+              replied: shouldMarkResponded,
+              respondedAt,
+              finalResponse
             }
           : current
       );
+
+      if (aiData.ai_error) {
+        const readableError = formatAiFailureForDisplay(aiData.ai_error);
+        const fallbackMessage = trigger === 'auto'
+          ? `Auto-generation degraded: ${readableError}`
+          : `Generation degraded: ${readableError}`;
+        setModalError(fallbackMessage);
+      } else if (aiData.email_error && trigger === 'auto') {
+        setModalError(`AI draft generated, but auto-send failed: ${aiData.email_error}`);
+      }
+
       await loadMessages();
     } catch (error) {
-      setModalError(error instanceof Error ? error.message : 'Unable to generate AI response.');
+      if (trigger === 'auto') {
+        setModalError(error instanceof Error
+          ? `Auto-generation failed: ${error.message}. You can still click Generate.`
+          : 'Auto-generation failed. You can still click Generate.');
+      } else {
+        setModalError(error instanceof Error ? error.message : 'Unable to generate AI response.');
+      }
     } finally {
-      setIsGenerating(false);
+      inFlightGenerationRef.current.delete(message.id);
+      setGeneratingTicketId((current) => (current === message.id ? null : current));
+      setIsGenerating(inFlightGenerationRef.current.size > 0);
     }
+  };
+
+  const handleGenerateResponse = async () => {
+    if (!selectedMessage) return;
+    await runAiGeneration(selectedMessage, 'manual');
   };
 
   const handleSendResponse = async () => {
@@ -427,6 +560,39 @@ export default function Dashboard() {
     setSelectedMessage(message);
     setAiDraft(message.finalResponse || message.aiDraft || '');
     setModalError('');
+
+    if (!message.finalResponse && !message.aiDraft) {
+      void runAiGeneration(message, 'auto');
+    }
+  };
+
+  const handleDeleteRepliedMessage = async () => {
+    if (!selectedMessage || !selectedMessage.replied) return;
+
+    const shouldDelete = window.confirm(
+      `Delete replied ticket ${selectedMessage.id}? This cannot be undone.`
+    );
+    if (!shouldDelete) return;
+
+    setModalError('');
+    setIsDeleting(true);
+
+    try {
+      const { error } = await supabase
+        .from('messages')
+        .delete()
+        .eq('ticket_id', selectedMessage.id);
+
+      if (error) throw new Error(error.message || 'Unable to delete replied ticket.');
+
+      await loadMessages();
+      setSelectedMessage(null);
+      setAiDraft('');
+    } catch (error) {
+      setModalError(error instanceof Error ? error.message : 'Unable to delete replied ticket.');
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const hasAiOutput =
@@ -626,7 +792,7 @@ export default function Dashboard() {
                         <path d="M10,21.236,6.755,14.745.264,11.5,6.755,8.255,10,1.764l3.245,6.491L19.736,11.5l-6.491,3.245ZM18,21l1.5,3L21,21l3-1.5L21,18l-1.5-3L18,18l-3,1.5ZM19.333,4.667,20.5,7l1.167-2.333L24,3.5,21.667,2.333,20.5,0,19.333,2.333,17,3.5Z" />
                       </svg>
                       <span className="ai-generate-text">
-                        {isGenerating ? 'Generating...' : hasAiOutput ? 'Re-Generate' : 'Generate'}
+                        {isGenerating && generatingTicketId === selectedMessage.id ? 'Generating...' : hasAiOutput ? 'Re-Generate' : 'Generate'}
                       </span>
                     </button>
                   </div>
@@ -634,7 +800,7 @@ export default function Dashboard() {
                   <textarea
                     value={aiDraft}
                     onChange={(e) => setAiDraft(e.target.value)}
-                    placeholder={isGenerating ? 'AI is analyzing context and drafting response...' : 'The generated response will appear here.'}
+                    placeholder={isGenerating && generatingTicketId === selectedMessage.id ? 'AI is analyzing context and drafting response...' : 'The generated response will appear here.'}
                     className="w-full flex-1 min-h-[280px] resize-none font-sans text-sm leading-relaxed bg-bg-card/40 border border-border rounded-xl p-4 focus:ring-1 focus:ring-primary/60"
                   />
 
@@ -648,6 +814,29 @@ export default function Dashboard() {
                         status === 'sent' ? 'Email Sent' :
                           <><Send className="w-4 h-4" /> {selectedMessage.replied ? 'Update Reply' : 'Send Response'}</>}
                     </button>
+                    {selectedMessage.replied && (
+                      <button
+                        onClick={handleDeleteRepliedMessage}
+                        disabled={isDeleting}
+                        className={`w-full py-3 text-sm flex items-center justify-center gap-3 border rounded-lg ${
+                          isDeleting
+                            ? 'border-error/30 text-error/60 bg-error/5 cursor-not-allowed'
+                            : 'border-error/40 text-error hover:bg-error/10'
+                        }`}
+                      >
+                        {isDeleting ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            Deleting...
+                          </>
+                        ) : (
+                          <>
+                            <Trash2 className="w-4 h-4" />
+                            Delete Replied Ticket
+                          </>
+                        )}
+                      </button>
+                    )}
                     {modalError && (
                       <p className="text-xs text-error bg-error/10 border border-error/20 rounded-lg px-3 py-2">
                         {modalError}

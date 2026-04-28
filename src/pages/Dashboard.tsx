@@ -11,7 +11,8 @@ import {
   Clock,
   CheckCircle2,
   AlertCircle,
-  Trash2
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import type { User } from '@supabase/supabase-js';
 import emailjs from '@emailjs/browser';
@@ -234,17 +235,20 @@ function formatAiFailureForDisplay(reason: string): string {
 }
 
 export default function Dashboard() {
+  const PAGE_SIZE = 6;
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [selectedMessage, setSelectedMessage] = useState<UiMessage | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSending, setIsSending] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
   const [aiDraft, setAiDraft] = useState('');
   const [status, setStatus] = useState<'idle' | 'sending' | 'sent'>('idle');
   const [modalError, setModalError] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [pendingPage, setPendingPage] = useState(1);
+  const [repliedPage, setRepliedPage] = useState(1);
+  const [deletingTicketId, setDeletingTicketId] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const inFlightGenerationRef = useRef<Set<string>>(new Set());
   const generationCooldownRef = useRef<Map<string, number>>(new Map());
@@ -346,6 +350,29 @@ export default function Dashboard() {
 
   const pendingMessages = useMemo(() => filteredMessages.filter((message) => !message.replied), [filteredMessages]);
   const repliedMessages = useMemo(() => filteredMessages.filter((message) => message.replied), [filteredMessages]);
+  const totalPendingPages = Math.max(1, Math.ceil(pendingMessages.length / PAGE_SIZE));
+  const totalRepliedPages = Math.max(1, Math.ceil(repliedMessages.length / PAGE_SIZE));
+  const pagedPendingMessages = useMemo(() => {
+    const start = (pendingPage - 1) * PAGE_SIZE;
+    return pendingMessages.slice(start, start + PAGE_SIZE);
+  }, [pendingMessages, pendingPage]);
+  const pagedRepliedMessages = useMemo(() => {
+    const start = (repliedPage - 1) * PAGE_SIZE;
+    return repliedMessages.slice(start, start + PAGE_SIZE);
+  }, [repliedMessages, repliedPage]);
+
+  useEffect(() => {
+    setPendingPage(1);
+    setRepliedPage(1);
+  }, [searchTerm]);
+
+  useEffect(() => {
+    if (pendingPage > totalPendingPages) setPendingPage(totalPendingPages);
+  }, [pendingPage, totalPendingPages]);
+
+  useEffect(() => {
+    if (repliedPage > totalRepliedPages) setRepliedPage(totalRepliedPages);
+  }, [repliedPage, totalRepliedPages]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -609,32 +636,39 @@ export default function Dashboard() {
     }
   };
 
-  const handleDeleteRepliedMessage = async () => {
-    if (!selectedMessage || !selectedMessage.replied) return;
+  const handleDeleteRepliedMessage = async (message: UiMessage) => {
+    if (!message.replied) return;
 
     const shouldDelete = window.confirm(
-      `Delete replied ticket ${selectedMessage.id}? This cannot be undone.`
+      `Delete replied ticket ${message.id}? This cannot be undone.`
     );
     if (!shouldDelete) return;
 
     setModalError('');
-    setIsDeleting(true);
+    setDeletingTicketId(message.id);
 
     try {
       const { error } = await supabase
         .from('messages')
         .delete()
-        .eq('ticket_id', selectedMessage.id);
+        .eq('ticket_id', message.id);
 
       if (error) throw new Error(error.message || 'Unable to delete replied ticket.');
 
       await loadMessages();
-      setSelectedMessage(null);
-      setAiDraft('');
+      if (selectedMessage?.id === message.id) {
+        setSelectedMessage(null);
+        setAiDraft('');
+      }
     } catch (error) {
-      setModalError(error instanceof Error ? error.message : 'Unable to delete replied ticket.');
+      const errorMessage = error instanceof Error ? error.message : 'Unable to delete replied ticket.';
+      if (selectedMessage?.id === message.id) {
+        setModalError(errorMessage);
+      } else {
+        setLoadError(errorMessage);
+      }
     } finally {
-      setIsDeleting(false);
+      setDeletingTicketId(null);
     }
   };
 
@@ -721,9 +755,28 @@ export default function Dashboard() {
                   <p className="text-sm text-text-muted border border-border rounded-xl px-4 py-3 bg-bg-card/30">No pending tickets.</p>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {pendingMessages.map((message) => (
+                    {pagedPendingMessages.map((message) => (
                       <MessageCard key={message.id} message={message} onClick={() => openMessage(message)} />
                     ))}
+                  </div>
+                )}
+                {pendingMessages.length > PAGE_SIZE && (
+                  <div className="mt-4 flex items-center justify-end gap-2 text-xs text-text-muted">
+                    <button
+                      onClick={() => setPendingPage((current) => Math.max(1, current - 1))}
+                      disabled={pendingPage === 1}
+                      className="px-2 py-1 border border-border rounded-md disabled:opacity-40 disabled:cursor-not-allowed hover:bg-bg-card"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <span>Page {pendingPage} of {totalPendingPages}</span>
+                    <button
+                      onClick={() => setPendingPage((current) => Math.min(totalPendingPages, current + 1))}
+                      disabled={pendingPage === totalPendingPages}
+                      className="px-2 py-1 border border-border rounded-md disabled:opacity-40 disabled:cursor-not-allowed hover:bg-bg-card"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
                   </div>
                 )}
               </section>
@@ -738,9 +791,34 @@ export default function Dashboard() {
                   <p className="text-sm text-text-muted border border-border rounded-xl px-4 py-3 bg-bg-card/30">No replied tickets yet.</p>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {repliedMessages.map((message) => (
-                      <MessageCard key={message.id} message={message} onClick={() => openMessage(message)} />
+                    {pagedRepliedMessages.map((message) => (
+                      <MessageCard
+                        key={message.id}
+                        message={message}
+                        onClick={() => openMessage(message)}
+                        onDelete={() => handleDeleteRepliedMessage(message)}
+                        isDeleting={deletingTicketId === message.id}
+                      />
                     ))}
+                  </div>
+                )}
+                {repliedMessages.length > PAGE_SIZE && (
+                  <div className="mt-4 flex items-center justify-end gap-2 text-xs text-text-muted">
+                    <button
+                      onClick={() => setRepliedPage((current) => Math.max(1, current - 1))}
+                      disabled={repliedPage === 1}
+                      className="px-2 py-1 border border-border rounded-md disabled:opacity-40 disabled:cursor-not-allowed hover:bg-bg-card"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <span>Page {repliedPage} of {totalRepliedPages}</span>
+                    <button
+                      onClick={() => setRepliedPage((current) => Math.min(totalRepliedPages, current + 1))}
+                      disabled={repliedPage === totalRepliedPages}
+                      className="px-2 py-1 border border-border rounded-md disabled:opacity-40 disabled:cursor-not-allowed hover:bg-bg-card"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
                   </div>
                 )}
               </section>
@@ -864,29 +942,6 @@ export default function Dashboard() {
                         status === 'sent' ? 'Email Sent' :
                           <><Send className="w-4 h-4" /> {selectedMessage.replied ? 'Update Reply' : 'Send Response'}</>}
                     </button>
-                    {selectedMessage.replied && (
-                      <button
-                        onClick={handleDeleteRepliedMessage}
-                        disabled={isDeleting}
-                        className={`w-full py-3 text-sm flex items-center justify-center gap-3 border rounded-lg ${
-                          isDeleting
-                            ? 'border-error/30 text-error/60 bg-error/5 cursor-not-allowed'
-                            : 'border-error/40 text-error hover:bg-error/10'
-                        }`}
-                      >
-                        {isDeleting ? (
-                          <>
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            Deleting...
-                          </>
-                        ) : (
-                          <>
-                            <Trash2 className="w-4 h-4" />
-                            Delete Replied Ticket
-                          </>
-                        )}
-                      </button>
-                    )}
                     {modalError && (
                       <p className="text-xs text-error bg-error/10 border border-error/20 rounded-lg px-3 py-2">
                         {modalError}

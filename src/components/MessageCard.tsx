@@ -1,5 +1,5 @@
 import { motion } from 'motion/react';
-import { Calendar, CheckCircle2, Mail } from 'lucide-react';
+import { Calendar, CheckCircle2, Mail, Trash2 } from 'lucide-react';
 import type { FC } from 'react';
 
 interface Message {
@@ -18,9 +18,11 @@ interface Message {
 interface MessageCardProps {
   message: Message;
   onClick: (message: Message) => void;
+  onDelete?: (message: Message) => void;
+  isDeleting?: boolean;
 }
 
-const MessageCard: FC<MessageCardProps> = ({ message, onClick }) => {
+const MessageCard: FC<MessageCardProps> = ({ message, onClick, onDelete, isDeleting = false }) => {
   const date = new Date(message.timestamp).toLocaleDateString();
   const repliedDate = message.respondedAt ? new Date(message.respondedAt).toLocaleDateString() : null;
   
@@ -76,6 +78,26 @@ const MessageCard: FC<MessageCardProps> = ({ message, onClick }) => {
           {message.replied && repliedDate ? repliedDate : date}
         </div>
       </div>
+      {message.replied && onDelete && (
+        <div className="pt-3 mt-3 border-t border-border">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(message);
+            }}
+            disabled={isDeleting}
+            className={`w-full px-3 py-2 rounded-lg border text-xs font-semibold uppercase tracking-wider flex items-center justify-center gap-2 ${
+              isDeleting
+                ? 'border-error/30 text-error/60 bg-error/5 cursor-not-allowed'
+                : 'border-error/40 text-error hover:bg-error/10'
+            }`}
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            {isDeleting ? 'Deleting...' : 'Delete'}
+          </button>
+        </div>
+      )}
     </motion.div>
   );
 };

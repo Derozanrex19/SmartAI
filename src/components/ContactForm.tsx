@@ -23,6 +23,9 @@ interface AiWebhookResponse {
   ai_error?: string | null;
 }
 
+const FALLBACK_DRAFT =
+  'Thanks for contacting SupportIQ. Our team reviewed your message and will follow up if anything else is needed.';
+
 function validateSupportEmail(email: string): string | null {
   const value = email.trim().toLowerCase();
   const basicRegex = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9-]+(\.[a-z0-9-]+)+$/i;
@@ -174,6 +177,16 @@ export default function ContactForm({ onSubmit }: ContactFormProps) {
               ? 'needs_human'
               : 'ai_ready';
 
+        const resolvedDraft = (aiData.draft_response || aiData.final_response || '').trim() || FALLBACK_DRAFT;
+        const resolvedFinalResponse =
+          nextStatus === 'responded'
+            ? ((aiData.final_response || aiData.draft_response || '').trim() || FALLBACK_DRAFT)
+            : null;
+        const resolvedRespondedAt =
+          nextStatus === 'responded'
+            ? (aiData.responded_at || new Date().toISOString())
+            : null;
+
         const { error: updateError } = await supabase
           .from('messages')
           .update({
@@ -181,10 +194,10 @@ export default function ContactForm({ onSubmit }: ContactFormProps) {
             ai_category: aiData.category || null,
             ai_priority: aiData.priority || null,
             ai_confidence: typeof aiData.confidence === 'number' ? aiData.confidence : null,
-            ai_draft: aiData.draft_response || aiData.final_response || null,
-            final_response: aiData.final_response || null,
+            ai_draft: resolvedDraft,
+            final_response: resolvedFinalResponse,
             status: nextStatus,
-            responded_at: aiData.responded_at || null,
+            responded_at: resolvedRespondedAt,
             ai_error: aiData.ai_error || aiData.email_error || null,
             ai_processed_at: new Date().toISOString()
           })

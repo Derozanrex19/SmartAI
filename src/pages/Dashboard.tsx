@@ -11,6 +11,7 @@ import {
   Clock,
   CheckCircle2,
   AlertCircle,
+  Archive,
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
@@ -39,6 +40,15 @@ interface DbMessage {
   final_response: string | null;
 }
 
+interface DbConversationMessage {
+  id: string;
+  ticket_id: string;
+  sender_type: 'customer' | 'admin' | 'ai';
+  sender_email: string | null;
+  body: string;
+  created_at: string;
+}
+
 interface UiMessage {
   id: string;
   firstName: string;
@@ -59,6 +69,15 @@ interface UiMessage {
   status: string;
 }
 
+interface UiConversationMessage {
+  id: string;
+  ticketId: string;
+  senderType: 'customer' | 'admin' | 'ai';
+  senderEmail: string | null;
+  body: string;
+  createdAt: string;
+}
+
 interface AiWebhookResponse {
   sentiment?: string;
   category?: string;
@@ -77,7 +96,19 @@ interface AiWebhookResponse {
 const VALID_CATEGORIES = ['technical', 'billing', 'feedback', 'other'] as const;
 const VALID_SENTIMENTS = ['frustrated', 'neutral', 'happy'] as const;
 const VALID_PRIORITIES = ['low', 'medium', 'high'] as const;
-const VALID_STATUSES = ['new', 'ai_ready', 'needs_human', 'responded', 'ai_generating'] as const;
+const VALID_STATUSES = [
+  'new',
+  'ai_ready',
+  'needs_human',
+  'needs_attention',
+  'customer_replied',
+  'replied',
+  'responded',
+  'closed',
+  'ai_generating'
+] as const;
+const NEEDS_ATTENTION_STATUSES = new Set(['new', 'ai_ready', 'needs_human', 'needs_attention', 'customer_replied', 'ai_generating']);
+const REPLIED_STATUSES = new Set(['replied', 'responded']);
 const FALLBACK_DRAFT = 'Thanks for contacting SupportIQ. Our team will review your ticket and respond shortly.';
 const AI_REQUEST_TIMEOUT_MS = 60000;
 const AI_TIMEOUT_COOLDOWN_MS = 30000;
@@ -240,18 +271,23 @@ export default function Dashboard() {
   const initialSearch = searchParams.get('q') || '';
   const initialPendingPage = Math.max(1, Number.parseInt(searchParams.get('pendingPage') || '1', 10) || 1);
   const initialRepliedPage = Math.max(1, Number.parseInt(searchParams.get('repliedPage') || '1', 10) || 1);
+  const initialClosedPage = Math.max(1, Number.parseInt(searchParams.get('closedPage') || '1', 10) || 1);
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [selectedMessage, setSelectedMessage] = useState<UiMessage | null>(null);
+  const [conversationMessages, setConversationMessages] = useState<UiConversationMessage[]>([]);
+  const [isLoadingConversation, setIsLoadingConversation] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [isClosingTicket, setIsClosingTicket] = useState(false);
   const [aiDraft, setAiDraft] = useState('');
   const [status, setStatus] = useState<'idle' | 'sending' | 'sent'>('idle');
   const [modalError, setModalError] = useState('');
   const [searchTerm, setSearchTerm] = useState(initialSearch);
   const [pendingPage, setPendingPage] = useState(initialPendingPage);
   const [repliedPage, setRepliedPage] = useState(initialRepliedPage);
+  const [closedPage, setClosedPage] = useState(initialClosedPage);
   const [deletingTicketId, setDeletingTicketId] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const inFlightGenerationRef = useRef<Set<string>>(new Set());
@@ -292,7 +328,8 @@ export default function Dashboard() {
     }
 
     const formatted = ((data || []) as DbMessage[]).map((msg) => {
-      const replied = msg.status === 'responded' || Boolean(msg.final_response);
+      const normalizedMessageStatus = normalizeStatus(msg.status || undefined, 'needs_attention');
+      const replied = REPLIED_STATUSES.has(normalizedMessageStatus) || Boolean(msg.final_response);
       return {
         id: msg.ticket_id || msg.id,
         firstName: msg.first_name,
@@ -310,12 +347,67 @@ export default function Dashboard() {
         confidence: msg.ai_confidence,
         aiDraft: msg.ai_draft,
         finalResponse: msg.final_response,
-        status: msg.status || 'new'
+        status: normalizedMessageStatus
       };
     });
 
     setMessages(formatted);
     setIsLoading(false);
+  };
+
+  const buildFallbackConversation = (message: UiMessage): UiConversationMessage[] => {
+    const items: UiConversationMessage[] = [
+      {
+        id: `${message.id}-initial`,
+        ticketId: message.id,
+        senderType: 'customer',
+        senderEmail: message.email,
+        body: message.message,
+        createdAt: message.timestamp
+      }
+    ];
+
+    if (message.finalResponse) {
+      items.push({
+        id: `${message.id}-final`,
+        ticketId: message.id,
+        senderType: 'admin',
+        senderEmail: currentUser?.email || null,
+        body: message.finalResponse,
+        createdAt: message.respondedAt || message.timestamp
+      });
+    }
+
+    return items;
+  };
+
+  const loadConversation = async (message: UiMessage) => {
+    setIsLoadingConversation(true);
+
+    const { data, error } = await supabase
+      .from('conversation_messages')
+      .select('id,ticket_id,sender_type,sender_email,body,created_at')
+      .eq('ticket_id', message.id)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      setConversationMessages(buildFallbackConversation(message));
+      setModalError('Conversation table is not ready yet. Showing the original ticket and latest saved reply only.');
+      setIsLoadingConversation(false);
+      return;
+    }
+
+    const formatted = ((data || []) as DbConversationMessage[]).map((item) => ({
+      id: item.id,
+      ticketId: item.ticket_id,
+      senderType: item.sender_type,
+      senderEmail: item.sender_email,
+      body: item.body,
+      createdAt: item.created_at
+    }));
+
+    setConversationMessages(formatted.length > 0 ? formatted : buildFallbackConversation(message));
+    setIsLoadingConversation(false);
   };
 
   useEffect(() => {
@@ -353,10 +445,21 @@ export default function Dashboard() {
     );
   }, [messages, searchTerm]);
 
-  const pendingMessages = useMemo(() => filteredMessages.filter((message) => !message.replied), [filteredMessages]);
-  const repliedMessages = useMemo(() => filteredMessages.filter((message) => message.replied), [filteredMessages]);
+  const pendingMessages = useMemo(
+    () => filteredMessages.filter((message) => NEEDS_ATTENTION_STATUSES.has(message.status)),
+    [filteredMessages]
+  );
+  const repliedMessages = useMemo(
+    () => filteredMessages.filter((message) => REPLIED_STATUSES.has(message.status)),
+    [filteredMessages]
+  );
+  const closedMessages = useMemo(
+    () => filteredMessages.filter((message) => message.status === 'closed'),
+    [filteredMessages]
+  );
   const totalPendingPages = Math.max(1, Math.ceil(pendingMessages.length / PAGE_SIZE));
   const totalRepliedPages = Math.max(1, Math.ceil(repliedMessages.length / PAGE_SIZE));
+  const totalClosedPages = Math.max(1, Math.ceil(closedMessages.length / PAGE_SIZE));
   const pagedPendingMessages = useMemo(() => {
     const start = (pendingPage - 1) * PAGE_SIZE;
     return pendingMessages.slice(start, start + PAGE_SIZE);
@@ -365,11 +468,16 @@ export default function Dashboard() {
     const start = (repliedPage - 1) * PAGE_SIZE;
     return repliedMessages.slice(start, start + PAGE_SIZE);
   }, [repliedMessages, repliedPage]);
+  const pagedClosedMessages = useMemo(() => {
+    const start = (closedPage - 1) * PAGE_SIZE;
+    return closedMessages.slice(start, start + PAGE_SIZE);
+  }, [closedMessages, closedPage]);
 
   useEffect(() => {
     if (previousSearchRef.current !== searchTerm) {
       setPendingPage(1);
       setRepliedPage(1);
+      setClosedPage(1);
       previousSearchRef.current = searchTerm;
     }
   }, [searchTerm]);
@@ -381,6 +489,10 @@ export default function Dashboard() {
   useEffect(() => {
     if (repliedPage > totalRepliedPages) setRepliedPage(totalRepliedPages);
   }, [repliedPage, totalRepliedPages]);
+
+  useEffect(() => {
+    if (closedPage > totalClosedPages) setClosedPage(totalClosedPages);
+  }, [closedPage, totalClosedPages]);
 
   useEffect(() => {
     const nextParams = new URLSearchParams(searchParams);
@@ -404,10 +516,16 @@ export default function Dashboard() {
       nextParams.delete('repliedPage');
     }
 
+    if (closedPage > 1) {
+      nextParams.set('closedPage', String(closedPage));
+    } else {
+      nextParams.delete('closedPage');
+    }
+
     if (nextParams.toString() !== searchParams.toString()) {
       setSearchParams(nextParams, { replace: true });
     }
-  }, [pendingPage, repliedPage, searchTerm, searchParams, setSearchParams]);
+  }, [closedPage, pendingPage, repliedPage, searchTerm, searchParams, setSearchParams]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -499,10 +617,10 @@ export default function Dashboard() {
       const confidence = normalizeConfidence(aiData.confidence);
       const generatedDraft = (aiData.draft_response || aiData.final_response || '').trim();
       const resolvedDraft = generatedDraft || FALLBACK_DRAFT;
-      const defaultStatus = message.replied ? 'responded' : 'ai_ready';
+      const defaultStatus = message.replied ? 'replied' : 'needs_attention';
       const normalizedStatus = normalizeStatus(aiData.status, defaultStatus);
-      const shouldMarkResponded = message.replied || aiData.auto_sent === true || normalizedStatus === 'responded';
-      const resolvedStatus = shouldMarkResponded ? 'responded' : normalizedStatus;
+      const shouldMarkResponded = message.replied || aiData.auto_sent === true || REPLIED_STATUSES.has(normalizedStatus);
+      const resolvedStatus = shouldMarkResponded ? 'replied' : 'needs_attention';
       const respondedAt = shouldMarkResponded
         ? (aiData.responded_at || message.respondedAt || new Date().toISOString())
         : null;
@@ -604,6 +722,7 @@ export default function Dashboard() {
     setStatus('sending');
 
     try {
+      const ticketSubject = `[SupportIQ ${selectedMessage.id}] Response to your concern`;
       await emailjs.send(
         emailJsServiceId,
         emailJsTemplateId,
@@ -611,9 +730,12 @@ export default function Dashboard() {
           to_email: selectedMessage.email,
           to_name: `${selectedMessage.firstName} ${selectedMessage.lastName}`,
           ticket_id: selectedMessage.id,
+          subject: ticketSubject,
+          email_subject: ticketSubject,
           ai_category: selectedMessage.aiCategory || 'other',
           sentiment: selectedMessage.sentiment || 'neutral',
-          response_message: aiDraft
+          response_message: aiDraft,
+          reply_instructions: `Reply to this email and keep ${selectedMessage.id} in the subject so SupportIQ can attach your response to the same ticket.`
         },
         { publicKey: emailJsPublicKey }
       );
@@ -625,20 +747,38 @@ export default function Dashboard() {
           final_response: aiDraft,
           responded_by: currentUser.id,
           responded_at: respondedAt,
-          status: 'responded'
+          status: 'replied'
         })
         .eq('ticket_id', selectedMessage.id);
 
       if (error) throw new Error(error.message || 'Unable to send response.');
 
+      const { error: conversationError } = await supabase
+        .from('conversation_messages')
+        .insert({
+          ticket_id: selectedMessage.id,
+          sender_type: 'admin',
+          sender_email: currentUser.email || null,
+          body: aiDraft
+        });
+
+      if (conversationError) throw new Error(conversationError.message || 'Unable to save reply in the conversation.');
+
       setStatus('sent');
       await loadMessages();
+      await loadConversation({
+        ...selectedMessage,
+        status: 'replied',
+        replied: true,
+        respondedAt,
+        finalResponse: aiDraft
+      });
 
       setTimeout(() => {
         setStatus('idle');
         setSelectedMessage((current) =>
-          current
-            ? { ...current, replied: true, respondedAt, finalResponse: aiDraft }
+          current && current.id === selectedMessage.id
+            ? { ...current, status: 'replied', replied: true, respondedAt, finalResponse: aiDraft }
             : current
         );
         setIsSending(false);
@@ -663,10 +803,12 @@ export default function Dashboard() {
 
   const openMessage = (message: UiMessage) => {
     setSelectedMessage(message);
-    setAiDraft(message.finalResponse || message.aiDraft || '');
+    setConversationMessages([]);
+    setAiDraft(message.status === 'closed' ? '' : (message.aiDraft || ''));
     setModalError('');
+    void loadConversation(message);
 
-    if (!message.finalResponse && !message.aiDraft) {
+    if (message.status !== 'closed' && !message.finalResponse && !message.aiDraft) {
       void runAiGeneration(message, 'auto');
     }
   };
@@ -707,6 +849,37 @@ export default function Dashboard() {
     }
   };
 
+  const handleCloseTicket = async () => {
+    if (!selectedMessage || selectedMessage.status === 'closed') return;
+
+    const shouldClose = window.confirm(`Close ticket ${selectedMessage.id}? You can still view it in Closed.`);
+    if (!shouldClose) return;
+
+    setModalError('');
+    setIsClosingTicket(true);
+
+    try {
+      const { error } = await supabase
+        .from('messages')
+        .update({ status: 'closed' })
+        .eq('ticket_id', selectedMessage.id);
+
+      if (error) throw new Error(error.message || 'Unable to close ticket.');
+
+      setSelectedMessage((current) =>
+        current && current.id === selectedMessage.id
+          ? { ...current, status: 'closed', replied: false }
+          : current
+      );
+      setAiDraft('');
+      await loadMessages();
+    } catch (error) {
+      setModalError(error instanceof Error ? error.message : 'Unable to close ticket.');
+    } finally {
+      setIsClosingTicket(false);
+    }
+  };
+
   const hasAiOutput =
     selectedMessage != null
       ? Boolean(
@@ -743,19 +916,23 @@ export default function Dashboard() {
             <h2 className="text-xs uppercase tracking-widest text-text-muted font-bold mb-4">Queues</h2>
             <div className="space-y-3">
               <div className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-primary/10 text-primary font-bold text-sm">
-                <MessageSquare className="w-4 h-4" /> Needs Reply
+                <MessageSquare className="w-4 h-4" /> Needs Attention
                 <span className="ml-auto bg-primary text-white text-[10px] py-0.5 px-2 rounded-full">{pendingMessages.length}</span>
               </div>
               <div className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-success/10 text-success font-bold text-sm">
                 <CheckCircle2 className="w-4 h-4" /> Replied
                 <span className="ml-auto bg-success text-bg-dark text-[10px] py-0.5 px-2 rounded-full">{repliedMessages.length}</span>
               </div>
+              <div className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-border/30 text-text-muted font-bold text-sm">
+                <Archive className="w-4 h-4" /> Closed
+                <span className="ml-auto bg-border text-text-light text-[10px] py-0.5 px-2 rounded-full">{closedMessages.length}</span>
+              </div>
             </div>
           </section>
           <section className="glass-morphism rounded-2xl p-5">
             <h3 className="text-sm font-semibold mb-3">Today Summary</h3>
             <p className="text-xs text-text-muted leading-relaxed">
-              Tickets are split by reply status so active workload stays focused and completed conversations stay searchable.
+              Customer replies move back to Needs Attention. Admin replies move to Replied until the ticket is resolved and closed.
             </p>
           </section>
         </aside>
@@ -783,11 +960,11 @@ export default function Dashboard() {
               <section>
                 <div className="flex items-center gap-2 mb-4">
                   <AlertCircle className="w-4 h-4 text-secondary" />
-                  <h3 className="text-lg font-semibold">Needs Reply</h3>
+                  <h3 className="text-lg font-semibold">Needs Attention</h3>
                   <span className="text-xs text-text-muted">{pendingMessages.length} ticket(s)</span>
                 </div>
                 {pendingMessages.length === 0 ? (
-                  <p className="text-sm text-text-muted border border-border rounded-xl px-4 py-3 bg-bg-card/30">No pending tickets.</p>
+                  <p className="text-sm text-text-muted border border-border rounded-xl px-4 py-3 bg-bg-card/30">No tickets need attention.</p>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {pagedPendingMessages.map((message) => (
@@ -831,8 +1008,6 @@ export default function Dashboard() {
                         key={message.id}
                         message={message}
                         onClick={() => openMessage(message)}
-                        onDelete={() => handleDeleteRepliedMessage(message)}
-                        isDeleting={deletingTicketId === message.id}
                       />
                     ))}
                   </div>
@@ -850,6 +1025,46 @@ export default function Dashboard() {
                     <button
                       onClick={() => setRepliedPage((current) => Math.min(totalRepliedPages, current + 1))}
                       disabled={repliedPage === totalRepliedPages}
+                      className="px-2 py-1 border border-border rounded-md disabled:opacity-40 disabled:cursor-not-allowed hover:bg-bg-card"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+                )}
+              </section>
+
+              <section>
+                <div className="flex items-center gap-2 mb-4">
+                  <Archive className="w-4 h-4 text-text-muted" />
+                  <h3 className="text-lg font-semibold">Closed</h3>
+                  <span className="text-xs text-text-muted">{closedMessages.length} ticket(s)</span>
+                </div>
+                {closedMessages.length === 0 ? (
+                  <p className="text-sm text-text-muted border border-border rounded-xl px-4 py-3 bg-bg-card/30">No closed tickets yet.</p>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {pagedClosedMessages.map((message) => (
+                      <MessageCard
+                        key={message.id}
+                        message={message}
+                        onClick={() => openMessage(message)}
+                      />
+                    ))}
+                  </div>
+                )}
+                {closedMessages.length > PAGE_SIZE && (
+                  <div className="mt-4 flex items-center justify-end gap-2 text-xs text-text-muted">
+                    <button
+                      onClick={() => setClosedPage((current) => Math.max(1, current - 1))}
+                      disabled={closedPage === 1}
+                      className="px-2 py-1 border border-border rounded-md disabled:opacity-40 disabled:cursor-not-allowed hover:bg-bg-card"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <span>Page {closedPage} of {totalClosedPages}</span>
+                    <button
+                      onClick={() => setClosedPage((current) => Math.min(totalClosedPages, current + 1))}
+                      disabled={closedPage === totalClosedPages}
                       className="px-2 py-1 border border-border rounded-md disabled:opacity-40 disabled:cursor-not-allowed hover:bg-bg-card"
                     >
                       <ChevronRight className="w-4 h-4" />
@@ -895,6 +1110,15 @@ export default function Dashboard() {
                     </div>
                   </div>
                 </div>
+                {selectedMessage.status !== 'closed' && (
+                  <button
+                    onClick={handleCloseTicket}
+                    disabled={isClosingTicket}
+                    className="px-3 py-2 rounded-lg border border-border text-xs font-semibold uppercase tracking-wider text-text-muted hover:bg-bg-card disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isClosingTicket ? 'Closing...' : 'Close Ticket'}
+                  </button>
+                )}
                 <button onClick={() => setSelectedMessage(null)} className="p-2 hover:bg-white/10 rounded-full transition-colors">✕</button>
               </div>
 
@@ -926,16 +1150,51 @@ export default function Dashboard() {
                       <p className="text-base font-bold text-success">{selectedMessage.confidence != null ? `${selectedMessage.confidence}%` : 'Pending'}</p>
                     </div>
                   </div>
+
+                  <div className="bg-bg-card/40 border border-border rounded-2xl p-4">
+                    <div className="flex items-center justify-between mb-4">
+                      <h4 className="text-xs uppercase tracking-widest text-text-muted font-bold">Conversation</h4>
+                      {selectedMessage.status === 'closed' && (
+                        <span className="badge bg-border/60 text-text-light">Closed</span>
+                      )}
+                    </div>
+                    {isLoadingConversation ? (
+                      <p className="text-sm text-text-muted">Loading conversation...</p>
+                    ) : (
+                      <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
+                        {conversationMessages.map((item) => (
+                          <div
+                            key={item.id}
+                            className={`rounded-xl border p-3 ${
+                              item.senderType === 'customer'
+                                ? 'bg-primary/10 border-primary/20'
+                                : 'bg-success/10 border-success/20'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-3 mb-2">
+                              <p className="text-xs font-bold uppercase tracking-wider">
+                                {item.senderType === 'customer' ? 'Customer' : 'Admin'}
+                              </p>
+                              <p className="text-[10px] text-text-muted">
+                                {new Date(item.createdAt).toLocaleString()}
+                              </p>
+                            </div>
+                            <p className="text-sm leading-relaxed whitespace-pre-wrap">{item.body}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 <div className="flex flex-col h-full bg-bg-card/20 rounded-2xl p-5 border border-border lg:col-span-7">
                   <div className="flex justify-between items-center mb-5">
                     <h4 className="text-sm font-bold uppercase tracking-widest text-text-muted flex items-center gap-2">
-                      <Sparkles className="w-4 h-4 text-secondary" /> AI Response Draft
+                      <Sparkles className="w-4 h-4 text-secondary" /> Reply Draft
                     </h4>
                     <button
                       onClick={handleGenerateResponse}
-                      disabled={isGenerating || selectedTicketCooldownSeconds > 0}
+                      disabled={selectedMessage.status === 'closed' || isGenerating || selectedTicketCooldownSeconds > 0}
                       className="ai-generate-btn"
                     >
                       <svg
@@ -963,19 +1222,26 @@ export default function Dashboard() {
                   <textarea
                     value={aiDraft}
                     onChange={(e) => setAiDraft(e.target.value)}
-                    placeholder={isGenerating && generatingTicketId === selectedMessage.id ? 'AI is analyzing context and drafting response...' : 'The generated response will appear here.'}
+                    disabled={selectedMessage.status === 'closed'}
+                    placeholder={
+                      selectedMessage.status === 'closed'
+                        ? 'This ticket is closed.'
+                        : isGenerating && generatingTicketId === selectedMessage.id
+                          ? 'AI is analyzing context and drafting response...'
+                          : 'Write a reply or generate an AI draft.'
+                    }
                     className="w-full flex-1 min-h-[280px] resize-none font-sans text-sm leading-relaxed bg-bg-card/40 border border-border rounded-xl p-4 focus:ring-1 focus:ring-primary/60"
                   />
 
                   <div className="mt-5 pt-5 border-t border-border space-y-3">
                     <button
                       onClick={handleSendResponse}
-                      disabled={!aiDraft || status !== 'idle' || isSending}
+                      disabled={selectedMessage.status === 'closed' || !aiDraft || status !== 'idle' || isSending}
                       className="btn-primary w-full py-3 text-sm flex items-center justify-center gap-3"
                     >
                       {status === 'sending' ? <Loader2 className="w-5 h-5 animate-spin" /> :
                         status === 'sent' ? 'Email Sent' :
-                          <><Send className="w-4 h-4" /> {selectedMessage.replied ? 'Update Reply' : 'Send Response'}</>}
+                          <><Send className="w-4 h-4" /> Send Reply</>}
                     </button>
                     {modalError && (
                       <p className="text-xs text-error bg-error/10 border border-error/20 rounded-lg px-3 py-2">

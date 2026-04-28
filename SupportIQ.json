@@ -119,7 +119,7 @@
                                                               },
                                          "sendBody":  true,
                                          "specifyBody":  "json",
-                                         "jsonBody":  "={\n  \"service_id\": \"service_ljxfr6s\",\n  \"template_id\": \"template_58o1ak3\",\n  \"user_id\": \"C5AQ10eBm9tuz4jLD\",\n  \"accessToken\": \"REPLACE_WITH_EMAILJS_PRIVATE_KEY\",\n  \"template_params\": {\n    \"to_email\": \"{{$json.email}}\",\n    \"to_name\": \"{{$json.first_name}} {{$json.last_name}}\",\n    \"ticket_id\": \"{{$json.ticket_id}}\",\n    \"ai_category\": \"{{$json.category}}\",\n    \"sentiment\": \"{{$json.sentiment}}\",\n    \"response_message\": \"{{$json.draft_response}}\"\n  }\n}",
+                                         "jsonBody":  "={\n  \"service_id\": \"service_ljxfr6s\",\n  \"template_id\": \"template_58o1ak3\",\n  \"user_id\": \"C5AQ10eBm9tuz4jLD\",\n  \"accessToken\": \"REPLACE_WITH_EMAILJS_PRIVATE_KEY\",\n  \"template_params\": {\n    \"to_email\": \"{{$json.email}}\",\n    \"to_name\": \"{{$json.first_name}} {{$json.last_name}}\",\n    \"ticket_id\": \"{{$json.ticket_id}}\",\n    \"email_subject\": \"[SupportIQ {{$json.ticket_id}}] Response to your concern\",\n    \"subject\": \"[SupportIQ {{$json.ticket_id}}] Response to your concern\",\n    \"ai_category\": \"{{$json.category}}\",\n    \"sentiment\": \"{{$json.sentiment}}\",\n    \"response_message\": \"{{$json.draft_response}}\",\n    \"reply_instructions\": \"Reply to this email and keep {{$json.ticket_id}} in the subject so we can continue the same conversation.\"\n  }\n}",
                                          "options":  {
 
                                                      }
@@ -174,6 +174,153 @@
                                    ],
                       "id":  "545e0260-c873-4b76-a53c-642b93e657dd",
                       "name":  "Respond to Webhook"
+                  },
+                  {
+                      "parameters":  {
+                                         "options":  {
+
+                                                     },
+                                         "postProcessAction":  "nothing"
+                                     },
+                      "type":  "n8n-nodes-base.emailReadImap",
+                      "typeVersion":  2,
+                      "position":  [
+                                       144,
+                                       176
+                                   ],
+                      "id":  "9b52986d-6d29-4f5d-873e-38c305b6303f",
+                      "name":  "Email Trigger (IMAP)"
+                  },
+                  {
+                      "parameters":  {
+                                         "jsCode":  "const subject = String($json.subject || $json.headers?.subject || '').trim();\nconst rawFrom = $json.from?.value?.[0]?.address || $json.from?.address || $json.from?.text || $json.from || $json.headers?.from || '';\nconst rawBody = String($json.textPlain || $json.text || $json.snippet || $json.html || '').trim();\n\nconst ticketMatch = subject.match(/TKT-\\d{6}-[A-Z0-9]+/i);\nconst ticket_id = ticketMatch ? ticketMatch[0].toUpperCase() : null;\n\nconst senderEmailMatch = String(rawFrom).match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/i);\nconst sender_email = senderEmailMatch ? senderEmailMatch[0].toLowerCase() : null;\n\nconst cleanedBody = rawBody\n  .replace(/<[^>]+>/g, ' ')\n  .split(/\\nOn .*wrote:|\\nFrom:|\\n>+/i)[0]\n  .replace(/\\r/g, '')\n  .replace(/\\n{3,}/g, '\\n\\n')\n  .trim();\n\nconst shouldProcess = Boolean(ticket_id && sender_email && cleanedBody);\n\nreturn [\n  {\n    json: {\n      ticket_id,\n      sender_email,\n      body: cleanedBody,\n      route_reply: shouldProcess ? 'process' : 'ignore',\n      original_subject: subject,\n      original_from: rawFrom\n    }\n  }\n];"
+                                     },
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       384,
+                                       176
+                                   ],
+                      "id":  "b44db172-bcf1-4a52-9b67-7bf551ed1bc2",
+                      "name":  "Parse Reply Email"
+                  },
+                  {
+                      "parameters":  {
+                                         "conditions":  {
+                                                            "options":  {
+                                                                            "caseSensitive":  true,
+                                                                            "leftValue":  "",
+                                                                            "typeValidation":  "strict",
+                                                                            "version":  2
+                                                                        },
+                                                            "conditions":  [
+                                                                               {
+                                                                                   "leftValue":  "={{ $json.route_reply }}",
+                                                                                   "rightValue":  "process",
+                                                                                   "operator":  {
+                                                                                                    "type":  "string",
+                                                                                                    "operation":  "equals"
+                                                                                                }
+                                                                               }
+                                                                           ],
+                                                            "combinator":  "and"
+                                                        },
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "type":  "n8n-nodes-base.if",
+                      "typeVersion":  2.2,
+                      "position":  [
+                                       608,
+                                       176
+                                   ],
+                      "id":  "cb13f7be-641b-4d7b-b6fb-24875bfd756b",
+                      "name":  "Has Ticket Reply Data"
+                  },
+                  {
+                      "parameters":  {
+                                         "method":  "POST",
+                                         "url":  "https://REPLACE_WITH_SUPABASE_PROJECT_REF.supabase.co/rest/v1/conversation_messages",
+                                         "sendHeaders":  true,
+                                         "headerParameters":  {
+                                                                  "parameters":  [
+                                                                                     {
+                                                                                         "name":  "apikey",
+                                                                                         "value":  "REPLACE_WITH_SUPABASE_SERVICE_ROLE_KEY"
+                                                                                     },
+                                                                                     {
+                                                                                         "name":  "Authorization",
+                                                                                         "value":  "=Bearer REPLACE_WITH_SUPABASE_SERVICE_ROLE_KEY"
+                                                                                     },
+                                                                                     {
+                                                                                         "name":  "Content-Type",
+                                                                                         "value":  "application/json"
+                                                                                     },
+                                                                                     {
+                                                                                         "name":  "Prefer",
+                                                                                         "value":  "return=minimal"
+                                                                                     }
+                                                                                 ]
+                                                              },
+                                         "sendBody":  true,
+                                         "specifyBody":  "json",
+                                         "jsonBody":  "={\n  \"ticket_id\": \"{{$json.ticket_id}}\",\n  \"sender_type\": \"customer\",\n  \"sender_email\": \"{{$json.sender_email}}\",\n  \"body\": \"{{$json.body}}\"\n}",
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "type":  "n8n-nodes-base.httpRequest",
+                      "typeVersion":  4.4,
+                      "position":  [
+                                       832,
+                                       112
+                                   ],
+                      "id":  "be7e6990-3049-4acb-a896-37153d8fc30b",
+                      "name":  "Insert Customer Reply",
+                      "continueOnFail":  true
+                  },
+                  {
+                      "parameters":  {
+                                         "method":  "PATCH",
+                                         "url":  "=https://REPLACE_WITH_SUPABASE_PROJECT_REF.supabase.co/rest/v1/messages?ticket_id=eq.{{$json.ticket_id}}",
+                                         "sendHeaders":  true,
+                                         "headerParameters":  {
+                                                                  "parameters":  [
+                                                                                     {
+                                                                                         "name":  "apikey",
+                                                                                         "value":  "REPLACE_WITH_SUPABASE_SERVICE_ROLE_KEY"
+                                                                                     },
+                                                                                     {
+                                                                                         "name":  "Authorization",
+                                                                                         "value":  "=Bearer REPLACE_WITH_SUPABASE_SERVICE_ROLE_KEY"
+                                                                                     },
+                                                                                     {
+                                                                                         "name":  "Content-Type",
+                                                                                         "value":  "application/json"
+                                                                                     },
+                                                                                     {
+                                                                                         "name":  "Prefer",
+                                                                                         "value":  "return=minimal"
+                                                                                     }
+                                                                                 ]
+                                                              },
+                                         "sendBody":  true,
+                                         "specifyBody":  "json",
+                                         "jsonBody":  "={\n  \"status\": \"needs_attention\"\n}",
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "type":  "n8n-nodes-base.httpRequest",
+                      "typeVersion":  4.4,
+                      "position":  [
+                                       1056,
+                                       112
+                                   ],
+                      "id":  "7b606fba-8c1b-4851-82ca-857f2d3d69ec",
+                      "name":  "Update Ticket To Needs Attention",
+                      "continueOnFail":  true
                   }
               ],
     "pinData":  {
@@ -263,6 +410,53 @@
                                                                       }
                                                                   ]
                                                               ]
+                                                 },
+                        "Email Trigger (IMAP)":  {
+                                                     "main":  [
+                                                                  [
+                                                                      {
+                                                                          "node":  "Parse Reply Email",
+                                                                          "type":  "main",
+                                                                          "index":  0
+                                                                      }
+                                                                  ]
+                                                              ]
+                                                 },
+                        "Parse Reply Email":  {
+                                                   "main":  [
+                                                                [
+                                                                    {
+                                                                        "node":  "Has Ticket Reply Data",
+                                                                        "type":  "main",
+                                                                        "index":  0
+                                                                    }
+                                                                ]
+                                                            ]
+                                               },
+                        "Has Ticket Reply Data":  {
+                                                      "main":  [
+                                                                   [
+                                                                       {
+                                                                           "node":  "Insert Customer Reply",
+                                                                           "type":  "main",
+                                                                           "index":  0
+                                                                       }
+                                                                   ],
+                                                                   [
+
+                                                                   ]
+                                                               ]
+                                                  },
+                        "Insert Customer Reply":  {
+                                                      "main":  [
+                                                                   [
+                                                                       {
+                                                                           "node":  "Update Ticket To Needs Attention",
+                                                                           "type":  "main",
+                                                                           "index":  0
+                                                                       }
+                                                                   ]
+                                                               ]
                                                  }
                     },
     "active":  true,

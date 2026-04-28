@@ -20,17 +20,29 @@ End-to-end flow:
 
 ## Status Contract
 Supported statuses:
-- `new`
-- `ai_ready`
-- `needs_human`
-- `responded`
+- `needs_attention`
+- `replied`
+- `closed`
+- Legacy/AI states still tolerated by the dashboard: `new`, `ai_ready`, `needs_human`, `customer_replied`, `responded`
 - `ai_generating` (optional/transient; reserved)
 
 Current behavior:
-- New contact form submissions create `new`.
-- AI generation usually moves to `ai_ready`.
-- Policy-flagged tickets move to `needs_human`.
-- Auto-send or manual send moves to `responded`.
+- New contact form submissions create `needs_attention`.
+- Admin replies move tickets to `replied`.
+- Customer replies caught by n8n should move tickets back to `needs_attention`.
+- Resolved tickets move to `closed` from the dashboard.
+
+## Threaded Conversation Demo
+Run `supabase-conversation-setup.sql` in Supabase to add `conversation_messages`.
+
+Thread flow:
+1. Customer submits `/contact-us` -> app creates a ticket and the first `conversation_messages` row.
+2. Admin sends a reply -> EmailJS sends the email, app saves an admin conversation row, and status becomes `replied`.
+3. Customer replies to email -> n8n Email Trigger (IMAP/Gmail) extracts the ticket ID from the subject, inserts a customer conversation row, and updates status to `needs_attention`.
+4. Admin clicks `Close Ticket` once resolved -> status becomes `closed`.
+
+Outgoing EmailJS templates should include the ticket ID in the subject, for example:
+`[SupportIQ {{ticket_id}}] Response to your concern`
 
 ## Policy Routing Rules (n8n)
 Routing decision after parse/validation:

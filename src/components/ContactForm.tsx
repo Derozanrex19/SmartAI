@@ -5,7 +5,7 @@ import type { FormEvent } from 'react';
 import { supabase } from '../lib/supabase';
 
 interface ContactFormProps {
-  onSubmit: (data: any) => void;
+  onSubmit: (data: { ticketId: string; timestamp: string }) => void;
 }
 
 interface AiWebhookResponse {
@@ -126,7 +126,7 @@ export default function ContactForm({ onSubmit }: ContactFormProps) {
       // Keep a neutral default internally; AI priority is shown in dashboard.
       priority: 'medium',
       message: formData.message.trim(),
-      status: 'new'
+      status: 'needs_attention'
     };
 
     const { error } = await supabase
@@ -138,6 +138,19 @@ export default function ContactForm({ onSubmit }: ContactFormProps) {
       setIsSubmitting(false);
       setSubmitError(error?.message || 'Unable to submit your message right now.');
       return;
+    }
+
+    const { error: threadError } = await supabase
+      .from('conversation_messages')
+      .insert({
+        ticket_id: generatedTicketId,
+        sender_type: 'customer',
+        sender_email: formData.email.trim().toLowerCase(),
+        body: formData.message.trim()
+      });
+
+    if (threadError) {
+      setSubmitWarning('Ticket submitted, but the conversation thread could not be initialized.');
     }
 
     // Trigger AI pipeline immediately after ticket creation so auto-send can happen
@@ -172,18 +185,18 @@ export default function ContactForm({ onSubmit }: ContactFormProps) {
 
         const nextStatus =
           (aiData.status || '').toLowerCase() === 'responded'
-            ? 'responded'
+            ? 'replied'
             : (aiData.status || '').toLowerCase() === 'needs_human'
-              ? 'needs_human'
-              : 'ai_ready';
+              ? 'needs_attention'
+              : 'needs_attention';
 
         const resolvedDraft = (aiData.draft_response || aiData.final_response || '').trim() || FALLBACK_DRAFT;
         const resolvedFinalResponse =
-          nextStatus === 'responded'
+          nextStatus === 'replied'
             ? ((aiData.final_response || aiData.draft_response || '').trim() || FALLBACK_DRAFT)
             : null;
         const resolvedRespondedAt =
-          nextStatus === 'responded'
+          nextStatus === 'replied'
             ? (aiData.responded_at || new Date().toISOString())
             : null;
 

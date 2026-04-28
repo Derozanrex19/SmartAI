@@ -11,6 +11,7 @@ interface Message {
   message: string;
   priority: string;
   timestamp: string;
+  status?: string;
   replied?: boolean;
   respondedAt?: string | null;
 }
@@ -25,6 +26,8 @@ interface MessageCardProps {
 const MessageCard: FC<MessageCardProps> = ({ message, onClick, onDelete, isDeleting = false }) => {
   const date = new Date(message.timestamp).toLocaleDateString();
   const repliedDate = message.respondedAt ? new Date(message.respondedAt).toLocaleDateString() : null;
+  const isClosed = message.status === 'closed';
+  const isReplied = message.status === 'replied' || message.status === 'responded' || message.replied;
   
   return (
     <motion.div 
@@ -48,13 +51,14 @@ const MessageCard: FC<MessageCardProps> = ({ message, onClick, onDelete, isDelet
           </div>
         </div>
         <span className={`badge ${
-          message.replied ? 'bg-success/20 text-success' :
+          isClosed ? 'bg-border/50 text-text-light' :
+            isReplied ? 'bg-success/20 text-success' :
             message.priority === 'High' ? 'bg-error/20 text-error' :
               message.priority === 'Medium' ? 'bg-amber-500/20 text-amber-500' :
                 message.priority === 'Low' ? 'bg-success/20 text-success' :
                   'bg-border/40 text-text-muted'
         }`}>
-          {message.replied ? 'Replied' : (message.priority === 'Pending' ? 'Pending AI' : message.priority)}
+          {isClosed ? 'Closed' : isReplied ? 'Replied' : (message.priority === 'Pending' ? 'Pending AI' : message.priority)}
         </span>
       </div>
 
@@ -67,7 +71,7 @@ const MessageCard: FC<MessageCardProps> = ({ message, onClick, onDelete, isDelet
           <span className="badge bg-primary/10 text-primary">
             {message.category}
           </span>
-          {message.replied && (
+          {isReplied && !isClosed && (
             <span className="badge bg-success/10 text-success flex items-center gap-1">
               <CheckCircle2 className="w-3 h-3" /> Sent
             </span>
@@ -75,10 +79,10 @@ const MessageCard: FC<MessageCardProps> = ({ message, onClick, onDelete, isDelet
         </div>
         <div className="flex items-center gap-1 text-xs text-text-muted">
           <Calendar className="w-3 h-3" />
-          {message.replied && repliedDate ? repliedDate : date}
+          {isReplied && repliedDate ? repliedDate : date}
         </div>
       </div>
-      {message.replied && onDelete && (
+      {isReplied && onDelete && (
         <div className="pt-3 mt-3 border-t border-border">
           <button
             type="button"

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Search,
@@ -236,6 +236,10 @@ function formatAiFailureForDisplay(reason: string): string {
 
 export default function Dashboard() {
   const PAGE_SIZE = 6;
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialSearch = searchParams.get('q') || '';
+  const initialPendingPage = Math.max(1, Number.parseInt(searchParams.get('pendingPage') || '1', 10) || 1);
+  const initialRepliedPage = Math.max(1, Number.parseInt(searchParams.get('repliedPage') || '1', 10) || 1);
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [selectedMessage, setSelectedMessage] = useState<UiMessage | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -245,13 +249,14 @@ export default function Dashboard() {
   const [aiDraft, setAiDraft] = useState('');
   const [status, setStatus] = useState<'idle' | 'sending' | 'sent'>('idle');
   const [modalError, setModalError] = useState('');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [pendingPage, setPendingPage] = useState(1);
-  const [repliedPage, setRepliedPage] = useState(1);
+  const [searchTerm, setSearchTerm] = useState(initialSearch);
+  const [pendingPage, setPendingPage] = useState(initialPendingPage);
+  const [repliedPage, setRepliedPage] = useState(initialRepliedPage);
   const [deletingTicketId, setDeletingTicketId] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const inFlightGenerationRef = useRef<Set<string>>(new Set());
   const generationCooldownRef = useRef<Map<string, number>>(new Map());
+  const previousSearchRef = useRef(searchTerm);
   const [cooldownTick, setCooldownTick] = useState(() => Date.now());
   const [generatingTicketId, setGeneratingTicketId] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -362,8 +367,11 @@ export default function Dashboard() {
   }, [repliedMessages, repliedPage]);
 
   useEffect(() => {
-    setPendingPage(1);
-    setRepliedPage(1);
+    if (previousSearchRef.current !== searchTerm) {
+      setPendingPage(1);
+      setRepliedPage(1);
+      previousSearchRef.current = searchTerm;
+    }
   }, [searchTerm]);
 
   useEffect(() => {
@@ -373,6 +381,33 @@ export default function Dashboard() {
   useEffect(() => {
     if (repliedPage > totalRepliedPages) setRepliedPage(totalRepliedPages);
   }, [repliedPage, totalRepliedPages]);
+
+  useEffect(() => {
+    const nextParams = new URLSearchParams(searchParams);
+    const trimmedSearch = searchTerm.trim();
+
+    if (trimmedSearch) {
+      nextParams.set('q', trimmedSearch);
+    } else {
+      nextParams.delete('q');
+    }
+
+    if (pendingPage > 1) {
+      nextParams.set('pendingPage', String(pendingPage));
+    } else {
+      nextParams.delete('pendingPage');
+    }
+
+    if (repliedPage > 1) {
+      nextParams.set('repliedPage', String(repliedPage));
+    } else {
+      nextParams.delete('repliedPage');
+    }
+
+    if (nextParams.toString() !== searchParams.toString()) {
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [pendingPage, repliedPage, searchTerm, searchParams, setSearchParams]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();

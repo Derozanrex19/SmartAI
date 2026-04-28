@@ -8,6 +8,21 @@ interface ContactFormProps {
   onSubmit: (data: any) => void;
 }
 
+interface AiWebhookResponse {
+  sentiment?: string;
+  category?: string;
+  priority?: string;
+  confidence?: number;
+  draft_response?: string;
+  status?: string;
+  route_action?: string;
+  auto_sent?: boolean;
+  responded_at?: string | null;
+  final_response?: string | null;
+  email_error?: string | null;
+  ai_error?: string | null;
+}
+
 function validateSupportEmail(email: string): string | null {
   const value = email.trim().toLowerCase();
   const basicRegex = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9-]+(\.[a-z0-9-]+)+$/i;
@@ -56,6 +71,8 @@ export default function ContactForm({ onSubmit }: ContactFormProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [ticketId, setTicketId] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState('');
+  const [submitWarning, setSubmitWarning] = useState('');
+  const n8nWebhookUrl = import.meta.env.VITE_N8N_WEBHOOK_URL as string | undefined;
 
   const generateTicketId = () => {
     const now = new Date();
@@ -87,6 +104,7 @@ export default function ContactForm({ onSubmit }: ContactFormProps) {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setSubmitError('');
+    setSubmitWarning('');
 
     if (!validate()) {
       return;
@@ -119,6 +137,71 @@ export default function ContactForm({ onSubmit }: ContactFormProps) {
       return;
     }
 
+    // Trigger AI pipeline immediately after ticket creation so auto-send can happen
+    // without requiring an admin to open the dashboard modal.
+    if (n8nWebhookUrl) {
+      try {
+        const webhookPayload = {
+          ticketId: generatedTicketId,
+          firstName: formData.firstName.trim(),
+          lastName: formData.lastName.trim(),
+          email: formData.email.trim().toLowerCase(),
+          category: 'unspecified',
+          priority: 'unspecified',
+          message: formData.message.trim()
+        };
+
+        const response = await fetch(n8nWebhookUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(webhookPayload)
+        });
+
+        const raw = await response.text();
+        let aiData: AiWebhookResponse = {};
+        if (raw.trim()) {
+          try {
+            aiData = JSON.parse(raw) as AiWebhookResponse;
+          } catch {
+            aiData = { ai_error: 'AI workflow returned invalid JSON.' };
+          }
+        }
+
+        const nextStatus =
+          (aiData.status || '').toLowerCase() === 'responded'
+            ? 'responded'
+            : (aiData.status || '').toLowerCase() === 'needs_human'
+              ? 'needs_human'
+              : 'ai_ready';
+
+        const { error: updateError } = await supabase
+          .from('messages')
+          .update({
+            ai_sentiment: aiData.sentiment || null,
+            ai_category: aiData.category || null,
+            ai_priority: aiData.priority || null,
+            ai_confidence: typeof aiData.confidence === 'number' ? aiData.confidence : null,
+            ai_draft: aiData.draft_response || aiData.final_response || null,
+            final_response: aiData.final_response || null,
+            status: nextStatus,
+            responded_at: aiData.responded_at || null,
+            ai_error: aiData.ai_error || aiData.email_error || null,
+            ai_processed_at: new Date().toISOString()
+          })
+          .eq('ticket_id', generatedTicketId);
+
+        if (updateError) {
+          setSubmitWarning('Ticket submitted, but AI post-processing could not be saved.');
+        } else if (!response.ok) {
+          setSubmitWarning('Ticket submitted. AI is temporarily unavailable and may need manual follow-up.');
+        }
+      } catch {
+        setSubmitWarning('Ticket submitted. AI processing could not be triggered right now.');
+      }
+    } else {
+      setSubmitWarning('Ticket submitted. Missing AI webhook URL, so auto-processing is disabled.');
+    }
+
     setTicketId(generatedTicketId);
     setIsSubmitting(false);
     onSubmit({
@@ -137,6 +220,7 @@ export default function ContactForm({ onSubmit }: ContactFormProps) {
     });
     setTicketId(null);
     setSubmitError('');
+    setSubmitWarning('');
     setErrors({});
   };
 
@@ -166,6 +250,9 @@ export default function ContactForm({ onSubmit }: ContactFormProps) {
         >
           Submit Another
         </button>
+        {submitWarning && (
+          <p className="text-xs text-text-muted mt-4">{submitWarning}</p>
+        )}
       </motion.div>
     );
   }

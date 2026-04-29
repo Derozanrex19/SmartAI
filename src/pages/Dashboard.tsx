@@ -267,6 +267,7 @@ function formatAiFailureForDisplay(reason: string): string {
 
 export default function Dashboard() {
   const PAGE_SIZE = 6;
+  type QueueTab = 'needs_attention' | 'replied' | 'closed';
   const [searchParams, setSearchParams] = useSearchParams();
   const initialSearch = searchParams.get('q') || '';
   const initialPendingPage = Math.max(1, Number.parseInt(searchParams.get('pendingPage') || '1', 10) || 1);
@@ -285,6 +286,7 @@ export default function Dashboard() {
   const [status, setStatus] = useState<'idle' | 'sending' | 'sent'>('idle');
   const [modalError, setModalError] = useState('');
   const [searchTerm, setSearchTerm] = useState(initialSearch);
+  const [activeQueue, setActiveQueue] = useState<QueueTab>('needs_attention');
   const [pendingPage, setPendingPage] = useState(initialPendingPage);
   const [repliedPage, setRepliedPage] = useState(initialRepliedPage);
   const [closedPage, setClosedPage] = useState(initialClosedPage);
@@ -915,18 +917,39 @@ export default function Dashboard() {
           <section className="glass-morphism rounded-2xl p-5">
             <h2 className="text-xs uppercase tracking-widest text-text-muted font-bold mb-4">Queues</h2>
             <div className="space-y-3">
-              <div className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-primary/10 text-primary font-bold text-sm">
+              <button
+                onClick={() => setActiveQueue('needs_attention')}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm ${
+                  activeQueue === 'needs_attention'
+                    ? 'bg-primary/15 text-primary border border-primary/30'
+                    : 'bg-bg-card/50 text-text-muted border border-border hover:bg-bg-card'
+                }`}
+              >
                 <MessageSquare className="w-4 h-4" /> Needs Attention
-                <span className="ml-auto bg-primary text-white text-[10px] py-0.5 px-2 rounded-full">{pendingMessages.length}</span>
-              </div>
-              <div className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-success/10 text-success font-bold text-sm">
+                <span className={`ml-auto text-[10px] py-0.5 px-2 rounded-full ${activeQueue === 'needs_attention' ? 'bg-primary text-white' : 'bg-border text-text-light'}`}>{pendingMessages.length}</span>
+              </button>
+              <button
+                onClick={() => setActiveQueue('replied')}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm ${
+                  activeQueue === 'replied'
+                    ? 'bg-success/15 text-success border border-success/30'
+                    : 'bg-bg-card/50 text-text-muted border border-border hover:bg-bg-card'
+                }`}
+              >
                 <CheckCircle2 className="w-4 h-4" /> Replied
-                <span className="ml-auto bg-success text-bg-dark text-[10px] py-0.5 px-2 rounded-full">{repliedMessages.length}</span>
-              </div>
-              <div className="w-full flex items-center gap-3 px-4 py-3 rounded-xl bg-border/30 text-text-muted font-bold text-sm">
+                <span className={`ml-auto text-[10px] py-0.5 px-2 rounded-full ${activeQueue === 'replied' ? 'bg-success text-bg-dark' : 'bg-border text-text-light'}`}>{repliedMessages.length}</span>
+              </button>
+              <button
+                onClick={() => setActiveQueue('closed')}
+                className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm ${
+                  activeQueue === 'closed'
+                    ? 'bg-border/60 text-text-light border border-border'
+                    : 'bg-bg-card/50 text-text-muted border border-border hover:bg-bg-card'
+                }`}
+              >
                 <Archive className="w-4 h-4" /> Closed
-                <span className="ml-auto bg-border text-text-light text-[10px] py-0.5 px-2 rounded-full">{closedMessages.length}</span>
-              </div>
+                <span className={`ml-auto text-[10px] py-0.5 px-2 rounded-full ${activeQueue === 'closed' ? 'bg-text-light text-bg-dark' : 'bg-border text-text-light'}`}>{closedMessages.length}</span>
+              </button>
             </div>
           </section>
           <section className="glass-morphism rounded-2xl p-5">
@@ -957,6 +980,7 @@ export default function Dashboard() {
 
           {!isLoading && !loadError && (
             <div className="space-y-8">
+              {activeQueue === 'needs_attention' && (
               <section>
                 <div className="flex items-center gap-2 mb-4">
                   <AlertCircle className="w-4 h-4 text-secondary" />
@@ -992,7 +1016,9 @@ export default function Dashboard() {
                   </div>
                 )}
               </section>
+              )}
 
+              {activeQueue === 'replied' && (
               <section>
                 <div className="flex items-center gap-2 mb-4">
                   <CheckCircle2 className="w-4 h-4 text-success" />
@@ -1032,7 +1058,9 @@ export default function Dashboard() {
                   </div>
                 )}
               </section>
+              )}
 
+              {activeQueue === 'closed' && (
               <section>
                 <div className="flex items-center gap-2 mb-4">
                   <Archive className="w-4 h-4 text-text-muted" />
@@ -1072,6 +1100,7 @@ export default function Dashboard() {
                   </div>
                 )}
               </section>
+              )}
             </div>
           )}
         </section>

@@ -177,19 +177,31 @@
                   },
                   {
                       "parameters":  {
+                                         "pollTimes":  {
+                                                           "item":  [
+                                                                        {
+                                                                            "mode":  "everyMinute"
+                                                                        }
+                                                                    ]
+                                                       },
+                                         "simple":  true,
+                                         "filters":  {
+                                                         "labelIds":  [
+                                                                          "INBOX"
+                                                                      ]
+                                                     },
                                          "options":  {
 
-                                                     },
-                                         "postProcessAction":  "nothing"
+                                                     }
                                      },
-                      "type":  "n8n-nodes-base.emailReadImap",
-                      "typeVersion":  2,
+                      "type":  "n8n-nodes-base.gmailTrigger",
+                      "typeVersion":  1,
                       "position":  [
                                        144,
                                        176
                                    ],
                       "id":  "9b52986d-6d29-4f5d-873e-38c305b6303f",
-                      "name":  "Email Trigger (IMAP)"
+                      "name":  "Email Trigger (Gmail)"
                   },
                   {
                       "parameters":  {
@@ -411,7 +423,7 @@
                                                                   ]
                                                               ]
                                                  },
-                        "Email Trigger (IMAP)":  {
+                        "Email Trigger (Gmail)":  {
                                                      "main":  [
                                                                   [
                                                                       {

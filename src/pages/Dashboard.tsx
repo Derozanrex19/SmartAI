@@ -93,6 +93,10 @@ interface AiWebhookResponse {
   ai_error?: string | null;
 }
 
+interface AiGenerationContext {
+  customerReply: string | null;
+}
+
 const VALID_CATEGORIES = ['technical', 'billing', 'feedback', 'other'] as const;
 const VALID_SENTIMENTS = ['frustrated', 'neutral', 'happy'] as const;
 const VALID_PRIORITIES = ['low', 'medium', 'high'] as const;
@@ -534,7 +538,7 @@ export default function Dashboard() {
     navigate('/login');
   };
 
-  const runAiGeneration = async (message: UiMessage, trigger: 'auto' | 'manual') => {
+  const runAiGeneration = async (message: UiMessage, trigger: 'auto' | 'manual', context?: AiGenerationContext) => {
     if (inFlightGenerationRef.current.has(message.id)) return;
     setModalError('');
     if (!n8nWebhookUrl) {
@@ -551,6 +555,9 @@ export default function Dashboard() {
     setIsGenerating(true);
     setGeneratingTicketId(message.id);
 
+    const latestCustomerReply = (context?.customerReply || '').trim();
+    const generationInputMessage = latestCustomerReply || message.message;
+
     const payload = {
       ticketId: message.id,
       firstName: message.firstName,
@@ -558,7 +565,9 @@ export default function Dashboard() {
       email: message.email,
       category: 'unspecified',
       priority: 'unspecified',
-      message: message.message
+      message: generationInputMessage,
+      latestCustomerReply: latestCustomerReply || null,
+      originalMessage: message.message
     };
 
     try {
@@ -611,11 +620,11 @@ export default function Dashboard() {
         window.clearTimeout(timeoutId);
       }
 
-      const sentiment = normalizeSentiment(aiData.sentiment, message.message);
-      const aiCategory = normalizeCategory(aiData.category, message.message);
+      const sentiment = normalizeSentiment(aiData.sentiment, generationInputMessage);
+      const aiCategory = normalizeCategory(aiData.category, generationInputMessage);
       const aiPriority = normalizePriority(aiData.priority);
       const resolvedPriority =
-        aiPriority ?? inferPriorityFromMessage(message.message, aiCategory, sentiment);
+        aiPriority ?? inferPriorityFromMessage(generationInputMessage, aiCategory, sentiment);
       const confidence = normalizeConfidence(aiData.confidence);
       const generatedDraft = (aiData.draft_response || aiData.final_response || '').trim();
       const resolvedDraft = generatedDraft || FALLBACK_DRAFT;
@@ -708,7 +717,11 @@ export default function Dashboard() {
 
   const handleGenerateResponse = async () => {
     if (!selectedMessage) return;
-    await runAiGeneration(selectedMessage, 'manual');
+    const latestCustomerReply = [...conversationMessages]
+      .reverse()
+      .find((item) => item.senderType === 'customer' && item.body.trim())?.body || null;
+
+    await runAiGeneration(selectedMessage, 'manual', { customerReply: latestCustomerReply });
   };
 
   const handleSendResponse = async () => {
@@ -893,6 +906,13 @@ export default function Dashboard() {
         )
       : false;
   const selectedTicketCooldownSeconds = selectedMessage ? getCooldownRemainingSeconds(selectedMessage.id) : 0;
+  const latestCustomerConversationReply = useMemo(
+    () => [...conversationMessages].reverse().find((item) => item.senderType === 'customer' && item.body.trim()) || null,
+    [conversationMessages]
+  );
+  const generationContextLabel = latestCustomerConversationReply
+    ? `Latest customer reply (${new Date(latestCustomerConversationReply.createdAt).toLocaleString()})`
+    : 'Original ticket message';
 
   return (
     <div className="min-h-screen flex flex-col bg-bg-dark">
@@ -1263,6 +1283,12 @@ export default function Dashboard() {
                   />
 
                   <div className="mt-5 pt-5 border-t border-border space-y-3">
+                    <div className="text-xs bg-bg-card/40 border border-border rounded-lg px-3 py-2">
+                      <p className="font-semibold text-text-light">{generationContextLabel}</p>
+                      <p className="text-text-muted mt-1 whitespace-pre-wrap">
+                        {(latestCustomerConversationReply?.body || selectedMessage.message).slice(0, 220)}
+                      </p>
+                    </div>
                     <button
                       onClick={handleSendResponse}
                       disabled={selectedMessage.status === 'closed' || !aiDraft || status !== 'idle' || isSending}

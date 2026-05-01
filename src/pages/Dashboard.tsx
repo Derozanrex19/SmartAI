@@ -881,7 +881,7 @@ export default function Dashboard() {
 
     try {
       const ticketSubject = `[SupportIQ ${selectedMessage.id}] Response to your concern`;
-      const replyLink = `${window.location.origin}/reply/${selectedMessage.id}`;
+      const replyLink = `${window.location.origin}/reply/${selectedMessage.id}?email=${encodeURIComponent(selectedMessage.email)}`;
       await emailjs.send(
         emailJsServiceId,
         emailJsTemplateId,

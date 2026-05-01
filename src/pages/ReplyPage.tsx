@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   ArrowLeft,
@@ -53,7 +53,9 @@ function validateEmail(email: string): string | null {
 
 export default function ReplyPage() {
   const { ticketId = '' } = useParams();
+  const [searchParams] = useSearchParams();
   const normalizedTicketId = useMemo(() => ticketId.trim().toUpperCase(), [ticketId]);
+  const emailFromLink = useMemo(() => (searchParams.get('email') || '').trim().toLowerCase(), [searchParams]);
   const storageKey = useMemo(
     () => (normalizedTicketId ? `supportiq-reply-email:${normalizedTicketId}` : ''),
     [normalizedTicketId]
@@ -68,9 +70,14 @@ export default function ReplyPage() {
 
   useEffect(() => {
     if (!storageKey) return;
+    if (emailFromLink && !validateEmail(emailFromLink)) {
+      setEmail(emailFromLink);
+      window.localStorage.setItem(storageKey, emailFromLink);
+      return;
+    }
     const rememberedEmail = window.localStorage.getItem(storageKey);
     if (rememberedEmail) setEmail(rememberedEmail);
-  }, [storageKey]);
+  }, [emailFromLink, storageKey]);
 
   const uploadAttachments = async (conversationMessageId: string) => {
     if (attachments.length === 0) return;

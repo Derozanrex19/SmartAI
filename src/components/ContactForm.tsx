@@ -23,6 +23,18 @@ interface AiWebhookResponse {
   ai_error?: string | null;
 }
 
+interface UploadedAttachmentRow {
+  ticket_id: string;
+  conversation_message_id: string;
+  sender_type: 'customer';
+  file_name: string;
+  file_path: string;
+  public_url: string;
+  mime_type: string;
+  file_size: number;
+  source: 'upload';
+}
+
 const FALLBACK_DRAFT =
   'Thanks for contacting SupportIQ. Our team reviewed your message and will follow up if anything else is needed.';
 const ATTACHMENTS_BUCKET = 'supportiq-attachments';
@@ -135,17 +147,7 @@ export default function ContactForm({ onSubmit }: ContactFormProps) {
   const uploadAttachments = async (ticketIdValue: string, conversationMessageId: string) => {
     if (attachments.length === 0) return null;
 
-    const attachmentRows: Array<{
-      ticket_id: string;
-      conversation_message_id: string;
-      sender_type: 'customer';
-      file_name: string;
-      file_path: string;
-      public_url: string;
-      mime_type: string;
-      file_size: number;
-      source: 'upload';
-    }> = [];
+    const attachmentRows: UploadedAttachmentRow[] = [];
 
     for (const attachment of attachments) {
       const filePath = `${ticketIdValue}/${Date.now()}-${attachment.id}-${sanitizeFileName(attachment.file.name)}`;
@@ -266,9 +268,11 @@ export default function ContactForm({ onSubmit }: ContactFormProps) {
       setSubmitWarning('Ticket submitted, but the conversation thread could not be initialized.');
     }
 
+    let uploadedAttachments: UploadedAttachmentRow[] | null = null;
+
     if (conversationData?.id) {
       try {
-        await uploadAttachments(generatedTicketId, conversationData.id);
+        uploadedAttachments = await uploadAttachments(generatedTicketId, conversationData.id);
       } catch (attachmentError) {
         setSubmitWarning(
           attachmentError instanceof Error
@@ -289,7 +293,14 @@ export default function ContactForm({ onSubmit }: ContactFormProps) {
           email: formData.email.trim().toLowerCase(),
           category: 'unspecified',
           priority: 'unspecified',
-          message: formData.message.trim()
+          message: formData.message.trim(),
+          attachments: (uploadedAttachments || []).map((attachment) => ({
+            fileName: attachment.file_name,
+            publicUrl: attachment.public_url,
+            mimeType: attachment.mime_type,
+            fileSize: attachment.file_size,
+            source: attachment.source
+          }))
         };
 
         const response = await fetch(n8nWebhookUrl, {

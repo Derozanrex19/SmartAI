@@ -129,6 +129,14 @@ interface AiGenerationContext {
   customerReply: string | null;
 }
 
+interface AiAttachmentInput {
+  fileName: string;
+  publicUrl: string;
+  mimeType: string | null;
+  fileSize: number | null;
+  source: 'upload' | 'email';
+}
+
 const VALID_CATEGORIES = ['technical', 'billing', 'feedback', 'other'] as const;
 const VALID_SENTIMENTS = ['frustrated', 'neutral', 'happy'] as const;
 const VALID_PRIORITIES = ['low', 'medium', 'high'] as const;
@@ -325,6 +333,18 @@ function formatAttachmentSize(size: number | null): string {
 
 function isImageAttachment(mimeType: string | null): boolean {
   return typeof mimeType === 'string' && mimeType.startsWith('image/');
+}
+
+function toAiAttachmentInput(attachment: UiMessageAttachment): AiAttachmentInput | null {
+  if (!attachment.publicUrl) return null;
+
+  return {
+    fileName: attachment.fileName,
+    publicUrl: attachment.publicUrl,
+    mimeType: attachment.mimeType,
+    fileSize: attachment.fileSize,
+    source: attachment.source
+  };
 }
 
 export default function Dashboard() {
@@ -644,6 +664,15 @@ export default function Dashboard() {
 
     const latestCustomerReply = (context?.customerReply || '').trim();
     const generationInputMessage = latestCustomerReply || message.message;
+    const ticketConversation = selectedMessage?.id === message.id ? conversationMessages : [];
+    const activeCustomerConversation = latestCustomerReply
+      ? [...ticketConversation].reverse().find((item) => item.senderType === 'customer' && item.body.trim()) || null
+      : ticketConversation.find((item) => item.senderType === 'customer') || null;
+    const aiAttachments = activeCustomerConversation
+      ? (attachmentsByConversation[activeCustomerConversation.id] || [])
+          .map(toAiAttachmentInput)
+          .filter((attachment): attachment is AiAttachmentInput => Boolean(attachment))
+      : [];
 
     const payload = {
       ticketId: message.id,
@@ -654,7 +683,8 @@ export default function Dashboard() {
       priority: 'unspecified',
       message: generationInputMessage,
       latestCustomerReply: latestCustomerReply || null,
-      originalMessage: message.message
+      originalMessage: message.message,
+      attachments: aiAttachments
     };
 
     try {

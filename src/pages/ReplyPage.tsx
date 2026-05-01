@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import {
@@ -54,6 +54,10 @@ function validateEmail(email: string): string | null {
 export default function ReplyPage() {
   const { ticketId = '' } = useParams();
   const normalizedTicketId = useMemo(() => ticketId.trim().toUpperCase(), [ticketId]);
+  const storageKey = useMemo(
+    () => (normalizedTicketId ? `supportiq-reply-email:${normalizedTicketId}` : ''),
+    [normalizedTicketId]
+  );
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
   const [attachments, setAttachments] = useState<UploadableAttachment[]>([]);
@@ -61,6 +65,12 @@ export default function ReplyPage() {
   const [warning, setWarning] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submittedAt, setSubmittedAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!storageKey) return;
+    const rememberedEmail = window.localStorage.getItem(storageKey);
+    if (rememberedEmail) setEmail(rememberedEmail);
+  }, [storageKey]);
 
   const uploadAttachments = async (conversationMessageId: string) => {
     if (attachments.length === 0) return;
@@ -184,6 +194,9 @@ export default function ReplyPage() {
       });
       setAttachments([]);
       setMessage('');
+      if (storageKey && email.trim()) {
+        window.localStorage.setItem(storageKey, email.trim().toLowerCase());
+      }
       setSubmittedAt(new Date().toISOString());
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Unable to send reply.');
@@ -240,7 +253,7 @@ export default function ReplyPage() {
                   </div>
                   <h2 className="text-2xl font-bold mb-2">Reply Sent</h2>
                   <p className="text-text-muted max-w-md mx-auto">
-                    Your message was added to the ticket. The support team will see it in their dashboard.
+                    Your message was added to this ticket. You can keep this page open and send another update anytime.
                   </p>
                   <p className="text-xs text-text-muted mt-4">
                     Sent {new Date(submittedAt).toLocaleString()}
@@ -254,7 +267,7 @@ export default function ReplyPage() {
                     onClick={() => setSubmittedAt(null)}
                     className="btn-primary mt-7"
                   >
-                    Send Another Reply
+                    Continue Replying
                   </button>
                 </motion.div>
               ) : (
@@ -278,7 +291,7 @@ export default function ReplyPage() {
                       <LockKeyhole className="w-5 h-5 text-secondary shrink-0 mt-0.5" />
                       <div>
                         <p className="text-sm font-bold">Ticket-linked reply</p>
-                        <p className="text-xs text-text-muted mt-1">Your message stays in this conversation.</p>
+                        <p className="text-xs text-text-muted mt-1">Use this same link for every update.</p>
                       </div>
                     </div>
                   </div>
@@ -292,6 +305,9 @@ export default function ReplyPage() {
                       placeholder="you@example.com"
                       className="w-full"
                     />
+                    <p className="text-xs text-text-muted">
+                      We remember this on your device for this ticket.
+                    </p>
                   </div>
 
                   <div className="space-y-2">

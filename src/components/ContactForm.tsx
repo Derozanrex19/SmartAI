@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { CheckCircle2, Loader2 } from 'lucide-react';
-import type { FormEvent } from 'react';
+import { CheckCircle2, FileImage, FileText, Loader2, Paperclip, X } from 'lucide-react';
+import type { ChangeEvent, FormEvent } from 'react';
 import { supabase } from '../lib/supabase';
 
 interface ContactFormProps {
@@ -25,6 +25,15 @@ interface AiWebhookResponse {
 
 const FALLBACK_DRAFT =
   'Thanks for contacting SupportIQ. Our team reviewed your message and will follow up if anything else is needed.';
+const ATTACHMENTS_BUCKET = 'supportiq-attachments';
+const MAX_ATTACHMENTS = 5;
+const MAX_ATTACHMENT_SIZE_BYTES = 10 * 1024 * 1024;
+
+type UploadableAttachment = {
+  id: string;
+  file: File;
+  previewUrl: string | null;
+};
 
 function validateSupportEmail(email: string): string | null {
   const value = email.trim().toLowerCase();
@@ -62,6 +71,20 @@ function validateSupportEmail(email: string): string | null {
   return null;
 }
 
+function sanitizeFileName(fileName: string): string {
+  return fileName.replace(/[^a-zA-Z0-9._-]/g, '-');
+}
+
+function formatFileSize(size: number): string {
+  if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  if (size >= 1024) return `${Math.round(size / 1024)} KB`;
+  return `${size} B`;
+}
+
+function isPreviewableImage(file: File): boolean {
+  return file.type.startsWith('image/');
+}
+
 export default function ContactForm({ onSubmit }: ContactFormProps) {
   const [formData, setFormData] = useState({
     firstName: '',
@@ -75,6 +98,7 @@ export default function ContactForm({ onSubmit }: ContactFormProps) {
   const [ticketId, setTicketId] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState('');
   const [submitWarning, setSubmitWarning] = useState('');
+  const [attachments, setAttachments] = useState<UploadableAttachment[]>([]);
   const n8nWebhookUrl = import.meta.env.VITE_N8N_WEBHOOK_URL as string | undefined;
 
   const generateTicketId = () => {
@@ -99,9 +123,96 @@ export default function ContactForm({ onSubmit }: ContactFormProps) {
       }
     }
     if (formData.message.length < 20) newErrors.message = 'Message must be at least 20 characters';
+    if (attachments.length > MAX_ATTACHMENTS) newErrors.attachments = `Up to ${MAX_ATTACHMENTS} attachments only`;
+    if (attachments.some((attachment) => attachment.file.size > MAX_ATTACHMENT_SIZE_BYTES)) {
+      newErrors.attachments = 'Each attachment must be 10 MB or smaller';
+    }
     
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
+  };
+
+  const uploadAttachments = async (ticketIdValue: string, conversationMessageId: string) => {
+    if (attachments.length === 0) return null;
+
+    const attachmentRows: Array<{
+      ticket_id: string;
+      conversation_message_id: string;
+      sender_type: 'customer';
+      file_name: string;
+      file_path: string;
+      public_url: string;
+      mime_type: string;
+      file_size: number;
+      source: 'upload';
+    }> = [];
+
+    for (const attachment of attachments) {
+      const filePath = `${ticketIdValue}/${Date.now()}-${attachment.id}-${sanitizeFileName(attachment.file.name)}`;
+      const { error: uploadError } = await supabase.storage
+        .from(ATTACHMENTS_BUCKET)
+        .upload(filePath, attachment.file, {
+          cacheControl: '3600',
+          contentType: attachment.file.type || 'application/octet-stream',
+          upsert: false
+        });
+
+      if (uploadError) {
+        throw new Error(uploadError.message || 'Unable to upload attachment.');
+      }
+
+      const { data: publicUrlData } = supabase.storage
+        .from(ATTACHMENTS_BUCKET)
+        .getPublicUrl(filePath);
+
+      attachmentRows.push({
+        ticket_id: ticketIdValue,
+        conversation_message_id: conversationMessageId,
+        sender_type: 'customer',
+        file_name: attachment.file.name,
+        file_path: filePath,
+        public_url: publicUrlData.publicUrl,
+        mime_type: attachment.file.type || 'application/octet-stream',
+        file_size: attachment.file.size,
+        source: 'upload'
+      });
+    }
+
+    const { error: attachmentInsertError } = await supabase
+      .from('message_attachments')
+      .insert(attachmentRows);
+
+    if (attachmentInsertError) {
+      throw new Error(attachmentInsertError.message || 'Unable to save attachment metadata.');
+    }
+
+    return attachmentRows;
+  };
+
+  const handleAttachmentChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const selectedFiles = Array.from(event.target.files || []);
+    if (selectedFiles.length === 0) return;
+
+    const availableSlots = Math.max(0, MAX_ATTACHMENTS - attachments.length);
+    const nextAttachments = selectedFiles.slice(0, availableSlots).map((file) => ({
+      id: `${file.name}-${file.size}-${crypto.randomUUID()}`,
+      file,
+      previewUrl: isPreviewableImage(file) ? URL.createObjectURL(file) : null
+    }));
+
+    setAttachments((current) => [...current, ...nextAttachments]);
+    setErrors((current) => ({ ...current, attachments: '' }));
+    event.target.value = '';
+  };
+
+  const removeAttachment = (attachmentId: string) => {
+    setAttachments((current) => {
+      const attachmentToRemove = current.find((item) => item.id === attachmentId);
+      if (attachmentToRemove?.previewUrl) {
+        URL.revokeObjectURL(attachmentToRemove.previewUrl);
+      }
+      return current.filter((item) => item.id !== attachmentId);
+    });
   };
 
   const handleSubmit = async (e: FormEvent) => {
@@ -140,17 +251,31 @@ export default function ContactForm({ onSubmit }: ContactFormProps) {
       return;
     }
 
-    const { error: threadError } = await supabase
+    const { data: conversationData, error: threadError } = await supabase
       .from('conversation_messages')
       .insert({
         ticket_id: generatedTicketId,
         sender_type: 'customer',
         sender_email: formData.email.trim().toLowerCase(),
         body: formData.message.trim()
-      });
+      })
+      .select('id')
+      .single();
 
     if (threadError) {
       setSubmitWarning('Ticket submitted, but the conversation thread could not be initialized.');
+    }
+
+    if (conversationData?.id) {
+      try {
+        await uploadAttachments(generatedTicketId, conversationData.id);
+      } catch (attachmentError) {
+        setSubmitWarning(
+          attachmentError instanceof Error
+            ? `Ticket submitted, but attachments could not be saved: ${attachmentError.message}`
+            : 'Ticket submitted, but attachments could not be saved.'
+        );
+      }
     }
 
     // Trigger AI pipeline immediately after ticket creation so auto-send can happen
@@ -244,6 +369,10 @@ export default function ContactForm({ onSubmit }: ContactFormProps) {
       email: '',
       message: ''
     });
+    attachments.forEach((attachment) => {
+      if (attachment.previewUrl) URL.revokeObjectURL(attachment.previewUrl);
+    });
+    setAttachments([]);
     setTicketId(null);
     setSubmitError('');
     setSubmitWarning('');
@@ -348,6 +477,61 @@ export default function ContactForm({ onSubmit }: ContactFormProps) {
           <p className="text-xs text-text-muted">
             Tip: include what happened, when it started, and any error messages you saw.
           </p>
+        </div>
+
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium text-text-muted">Attachments</p>
+              <p className="text-xs text-text-muted">Images, PDFs, and docs up to 10 MB each.</p>
+            </div>
+            <label className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-border bg-bg-card/50 hover:bg-bg-card cursor-pointer text-sm font-medium">
+              <Paperclip className="w-4 h-4" />
+              Add files
+              <input
+                type="file"
+                accept="image/*,.pdf,.doc,.docx,.txt"
+                multiple
+                className="hidden"
+                onChange={handleAttachmentChange}
+              />
+            </label>
+          </div>
+
+          {attachments.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {attachments.map((attachment) => (
+                <div
+                  key={attachment.id}
+                  className="rounded-xl border border-border bg-bg-card/40 p-3 flex gap-3"
+                >
+                  <div className="w-12 h-12 rounded-lg overflow-hidden bg-bg-dark border border-border flex items-center justify-center flex-shrink-0">
+                    {attachment.previewUrl ? (
+                      <img src={attachment.previewUrl} alt={attachment.file.name} className="w-full h-full object-cover" />
+                    ) : attachment.file.type === 'application/pdf' ? (
+                      <FileText className="w-5 h-5 text-secondary" />
+                    ) : (
+                      <FileImage className="w-5 h-5 text-primary" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium truncate">{attachment.file.name}</p>
+                    <p className="text-xs text-text-muted">{formatFileSize(attachment.file.size)}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => removeAttachment(attachment.id)}
+                    className="p-1 rounded-md hover:bg-white/10 self-start"
+                    aria-label={`Remove ${attachment.file.name}`}
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {errors.attachments && <span className="text-xs text-error">{errors.attachments}</span>}
         </div>
 
         <button 

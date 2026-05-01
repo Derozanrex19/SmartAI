@@ -13,7 +13,10 @@ import {
   AlertCircle,
   Archive,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  ExternalLink,
+  FileText,
+  ImageIcon
 } from 'lucide-react';
 import type { User } from '@supabase/supabase-js';
 import emailjs from '@emailjs/browser';
@@ -49,6 +52,20 @@ interface DbConversationMessage {
   created_at: string;
 }
 
+interface DbMessageAttachment {
+  id: string;
+  ticket_id: string;
+  conversation_message_id: string | null;
+  sender_type: 'customer' | 'admin' | 'ai';
+  file_name: string;
+  file_path: string | null;
+  public_url: string | null;
+  mime_type: string | null;
+  file_size: number | null;
+  source: 'upload' | 'email';
+  created_at: string;
+}
+
 interface UiMessage {
   id: string;
   firstName: string;
@@ -75,6 +92,20 @@ interface UiConversationMessage {
   senderType: 'customer' | 'admin' | 'ai';
   senderEmail: string | null;
   body: string;
+  createdAt: string;
+}
+
+interface UiMessageAttachment {
+  id: string;
+  ticketId: string;
+  conversationMessageId: string | null;
+  senderType: 'customer' | 'admin' | 'ai';
+  fileName: string;
+  filePath: string | null;
+  publicUrl: string | null;
+  mimeType: string | null;
+  fileSize: number | null;
+  source: 'upload' | 'email';
   createdAt: string;
 }
 
@@ -265,6 +296,32 @@ function formatAiFailureForDisplay(reason: string): string {
   return `AI failed: ${reason}`;
 }
 
+function getCleanConversationBody(rawBody: string): string {
+  const value = String(rawBody || '');
+  const quoteStartPattern =
+    /\n\s*(on .+wrote:|from:\s|sent:\s|subject:\s|to:\s|---+\s*original message\s*---+)/i;
+  const firstPass = value.replace(/\r/g, '');
+  const matched = firstPass.match(quoteStartPattern);
+  const trimmed = matched && typeof matched.index === 'number'
+    ? firstPass.slice(0, matched.index)
+    : firstPass;
+
+  return trimmed
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function formatAttachmentSize(size: number | null): string {
+  if (!size || Number.isNaN(size)) return 'File';
+  if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  if (size >= 1024) return `${Math.round(size / 1024)} KB`;
+  return `${size} B`;
+}
+
+function isImageAttachment(mimeType: string | null): boolean {
+  return typeof mimeType === 'string' && mimeType.startsWith('image/');
+}
+
 export default function Dashboard() {
   const PAGE_SIZE = 6;
   type QueueTab = 'needs_attention' | 'replied' | 'closed';
@@ -276,6 +333,7 @@ export default function Dashboard() {
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [selectedMessage, setSelectedMessage] = useState<UiMessage | null>(null);
   const [conversationMessages, setConversationMessages] = useState<UiConversationMessage[]>([]);
+  const [messageAttachments, setMessageAttachments] = useState<UiMessageAttachment[]>([]);
   const [isLoadingConversation, setIsLoadingConversation] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -386,20 +444,28 @@ export default function Dashboard() {
   const loadConversation = async (message: UiMessage) => {
     setIsLoadingConversation(true);
 
-    const { data, error } = await supabase
-      .from('conversation_messages')
-      .select('id,ticket_id,sender_type,sender_email,body,created_at')
-      .eq('ticket_id', message.id)
-      .order('created_at', { ascending: true });
+    const [conversationResult, attachmentResult] = await Promise.all([
+      supabase
+        .from('conversation_messages')
+        .select('id,ticket_id,sender_type,sender_email,body,created_at')
+        .eq('ticket_id', message.id)
+        .order('created_at', { ascending: true }),
+      supabase
+        .from('message_attachments')
+        .select('id,ticket_id,conversation_message_id,sender_type,file_name,file_path,public_url,mime_type,file_size,source,created_at')
+        .eq('ticket_id', message.id)
+        .order('created_at', { ascending: true })
+    ]);
 
-    if (error) {
+    if (conversationResult.error) {
       setConversationMessages(buildFallbackConversation(message));
+      setMessageAttachments([]);
       setModalError('Conversation table is not ready yet. Showing the original ticket and latest saved reply only.');
       setIsLoadingConversation(false);
       return;
     }
 
-    const formatted = ((data || []) as DbConversationMessage[]).map((item) => ({
+    const formatted = ((conversationResult.data || []) as DbConversationMessage[]).map((item) => ({
       id: item.id,
       ticketId: item.ticket_id,
       senderType: item.sender_type,
@@ -408,7 +474,22 @@ export default function Dashboard() {
       createdAt: item.created_at
     }));
 
+    const formattedAttachments = ((attachmentResult.data || []) as DbMessageAttachment[]).map((item) => ({
+      id: item.id,
+      ticketId: item.ticket_id,
+      conversationMessageId: item.conversation_message_id,
+      senderType: item.sender_type,
+      fileName: item.file_name,
+      filePath: item.file_path,
+      publicUrl: item.public_url,
+      mimeType: item.mime_type,
+      fileSize: item.file_size,
+      source: item.source,
+      createdAt: item.created_at
+    }));
+
     setConversationMessages(formatted.length > 0 ? formatted : buildFallbackConversation(message));
+    setMessageAttachments(formattedAttachments);
     setIsLoadingConversation(false);
   };
 
@@ -806,6 +887,7 @@ export default function Dashboard() {
   const openMessage = (message: UiMessage) => {
     setSelectedMessage(message);
     setConversationMessages([]);
+    setMessageAttachments([]);
     setAiDraft(message.status === 'closed' ? '' : (message.aiDraft || ''));
     setModalError('');
     void loadConversation(message);
@@ -893,6 +975,17 @@ export default function Dashboard() {
         )
       : false;
   const selectedTicketCooldownSeconds = selectedMessage ? getCooldownRemainingSeconds(selectedMessage.id) : 0;
+  const attachmentsByConversation = useMemo(
+    () => messageAttachments.reduce<Record<string, UiMessageAttachment[]>>((accumulator, attachment) => {
+      if (!attachment.conversationMessageId) return accumulator;
+      if (!accumulator[attachment.conversationMessageId]) {
+        accumulator[attachment.conversationMessageId] = [];
+      }
+      accumulator[attachment.conversationMessageId].push(attachment);
+      return accumulator;
+    }, {}),
+    [messageAttachments]
+  );
 
   return (
     <div className="min-h-screen flex flex-col bg-bg-dark">
@@ -1208,7 +1301,41 @@ export default function Dashboard() {
                                 {new Date(item.createdAt).toLocaleString()}
                               </p>
                             </div>
-                            <p className="text-sm leading-relaxed whitespace-pre-wrap">{item.body}</p>
+                            <p className="text-sm leading-relaxed whitespace-pre-wrap">{getCleanConversationBody(item.body)}</p>
+                            {(attachmentsByConversation[item.id] || []).length > 0 && (
+                              <div className="mt-3 grid gap-2">
+                                {(attachmentsByConversation[item.id] || []).map((attachment) => (
+                                  <a
+                                    key={attachment.id}
+                                    href={attachment.publicUrl || undefined}
+                                    target={attachment.publicUrl ? '_blank' : undefined}
+                                    rel={attachment.publicUrl ? 'noreferrer' : undefined}
+                                    className={`flex items-center gap-3 rounded-lg border px-3 py-2 ${
+                                      attachment.publicUrl
+                                        ? 'border-white/10 bg-white/5 hover:bg-white/10'
+                                        : 'border-white/10 bg-white/5 cursor-default'
+                                    }`}
+                                  >
+                                    <div className="w-9 h-9 rounded-lg bg-bg-dark/70 border border-border flex items-center justify-center flex-shrink-0">
+                                      {isImageAttachment(attachment.mimeType) ? (
+                                        <ImageIcon className="w-4 h-4 text-primary" />
+                                      ) : (
+                                        <FileText className="w-4 h-4 text-secondary" />
+                                      )}
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <p className="text-xs font-semibold truncate">{attachment.fileName}</p>
+                                      <p className="text-[10px] text-text-muted">
+                                        {attachment.source === 'email' && !attachment.publicUrl
+                                          ? `Received by email${attachment.fileSize ? ` · ${formatAttachmentSize(attachment.fileSize)}` : ''}`
+                                          : formatAttachmentSize(attachment.fileSize)}
+                                      </p>
+                                    </div>
+                                    {attachment.publicUrl && <ExternalLink className="w-3.5 h-3.5 text-text-muted" />}
+                                  </a>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>

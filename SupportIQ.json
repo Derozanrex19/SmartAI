@@ -193,7 +193,7 @@
                   },
                   {
                       "parameters":  {
-                                         "jsCode":  "const subject = String($json.subject || $json.headers?.subject || '').trim();\nconst rawFrom = $json.from?.value?.[0]?.address || $json.from?.address || $json.from?.text || $json.from || $json.headers?.from || '';\nconst rawBody = String($json.textPlain || $json.text || $json.snippet || $json.html || '').trim();\n\nconst ticketMatch = subject.match(/TKT-\\d{6}-[A-Z0-9]+/i);\nconst ticket_id = ticketMatch ? ticketMatch[0].toUpperCase() : null;\n\nconst senderEmailMatch = String(rawFrom).match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/i);\nconst sender_email = senderEmailMatch ? senderEmailMatch[0].toLowerCase() : null;\n\nconst cleanedBody = rawBody\n  .replace(/<[^>]+>/g, ' ')\n  .split(/\\nOn .*wrote:|\\nFrom:|\\n>+/i)[0]\n  .replace(/\\r/g, '')\n  .replace(/\\n{3,}/g, '\\n\\n')\n  .trim();\n\nconst shouldProcess = Boolean(ticket_id && sender_email && cleanedBody);\n\nreturn [\n  {\n    json: {\n      ticket_id,\n      sender_email,\n      body: cleanedBody,\n      route_reply: shouldProcess ? 'process' : 'ignore',\n      original_subject: subject,\n      original_from: rawFrom\n    }\n  }\n];"
+                                         "jsCode":  "const subject = String($json.subject || $json.headers?.subject || '').trim();\nconst rawFrom = $json.from?.value?.[0]?.address || $json.from?.address || $json.from?.text || $json.from || $json.headers?.from || '';\nconst rawBody = String($json.textPlain || $json.text || $json.snippet || $json.html || '').trim();\n\nconst ticketMatch = subject.match(/TKT-\\d{6}-[A-Z0-9]+/i);\nconst ticket_id = ticketMatch ? ticketMatch[0].toUpperCase() : null;\n\nconst senderEmailMatch = String(rawFrom).match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}/i);\nconst sender_email = senderEmailMatch ? senderEmailMatch[0].toLowerCase() : null;\n\nconst cleanedBody = rawBody\n  .replace(/<[^>]+>/g, ' ')\n  .split(/\\nOn .*wrote:|\\nFrom:|\\n>+/i)[0]\n  .replace(/\\r/g, '')\n  .replace(/\\n{3,}/g, '\\n\\n')\n  .trim();\n\nconst parseFileSize = (value) => {\n  if (typeof value === 'number') return value;\n  if (typeof value !== 'string') return null;\n  const trimmed = value.trim();\n  const match = trimmed.match(/([\\d.]+)\\s*(B|KB|MB|GB)?/i);\n  if (!match) return null;\n  const amount = Number(match[1]);\n  if (!Number.isFinite(amount)) return null;\n  const unit = (match[2] || 'B').toUpperCase();\n  if (unit === 'KB') return Math.round(amount * 1024);\n  if (unit === 'MB') return Math.round(amount * 1024 * 1024);\n  if (unit === 'GB') return Math.round(amount * 1024 * 1024 * 1024);\n  return Math.round(amount);\n};\n\nconst attachments = Object.values($binary || {}).map((file, index) => ({\n  file_name: file.fileName || file.fileNameLiteral || `email-attachment-${index + 1}`,\n  mime_type: file.mimeType || null,\n  file_size: parseFileSize(file.fileSize),\n  source: 'email'\n}));\n\nconst normalizedBody = cleanedBody || (attachments.length > 0 ? 'Customer sent an attachment by email.' : '');\nconst shouldProcess = Boolean(ticket_id && sender_email && (normalizedBody || attachments.length > 0));\n\nreturn [\n  {\n    json: {\n      ticket_id,\n      sender_email,\n      body: normalizedBody,\n      attachments,\n      route_reply: shouldProcess ? 'process' : 'ignore',\n      original_subject: subject,\n      original_from: rawFrom\n    }\n  }\n];"
                                      },
                       "type":  "n8n-nodes-base.code",
                       "typeVersion":  2,
@@ -259,7 +259,7 @@
                                                                                      },
                                                                                      {
                                                                                          "name":  "Prefer",
-                                                                                         "value":  "return=minimal"
+                                                                                         "value":  "return=representation"
                                                                                      }
                                                                                  ]
                                                               },
@@ -320,6 +320,61 @@
                                    ],
                       "id":  "7b606fba-8c1b-4851-82ca-857f2d3d69ec",
                       "name":  "Update Ticket To Needs Attention",
+                      "continueOnFail":  true
+                  },
+                  {
+                      "parameters":  {
+                                         "jsCode":  "const replyData = $items('Parse Reply Email', 0, 0)?.[0]?.json || {};\nconst insertedPayload = Array.isArray($json) ? $json[0] : $json;\nconst replyId = insertedPayload?.id || insertedPayload?.[0]?.id || null;\nconst attachments = Array.isArray(replyData.attachments) ? replyData.attachments : [];\n\nif (!replyId || attachments.length === 0) {\n  return [];\n}\n\nreturn attachments.map((attachment) => ({\n  json: {\n    ticket_id: replyData.ticket_id,\n    conversation_message_id: replyId,\n    sender_type: 'customer',\n    file_name: attachment.file_name,\n    file_path: null,\n    public_url: null,\n    mime_type: attachment.mime_type || null,\n    file_size: attachment.file_size || null,\n    source: 'email'\n  }\n}));"
+                                     },
+                      "type":  "n8n-nodes-base.code",
+                      "typeVersion":  2,
+                      "position":  [
+                                       1056,
+                                       224
+                                   ],
+                      "id":  "71871bb8-7130-45fd-b0d5-c58e0f63188a",
+                      "name":  "Build Reply Attachment Rows"
+                  },
+                  {
+                      "parameters":  {
+                                         "method":  "POST",
+                                         "url":  "https://REPLACE_WITH_SUPABASE_PROJECT_REF.supabase.co/rest/v1/message_attachments",
+                                         "sendHeaders":  true,
+                                         "headerParameters":  {
+                                                                  "parameters":  [
+                                                                                     {
+                                                                                         "name":  "apikey",
+                                                                                         "value":  "REPLACE_WITH_SUPABASE_SERVICE_ROLE_KEY"
+                                                                                     },
+                                                                                     {
+                                                                                         "name":  "Authorization",
+                                                                                         "value":  "=Bearer REPLACE_WITH_SUPABASE_SERVICE_ROLE_KEY"
+                                                                                     },
+                                                                                     {
+                                                                                         "name":  "Content-Type",
+                                                                                         "value":  "application/json"
+                                                                                     },
+                                                                                     {
+                                                                                         "name":  "Prefer",
+                                                                                         "value":  "return=minimal"
+                                                                                     }
+                                                                                 ]
+                                                              },
+                                         "sendBody":  true,
+                                         "specifyBody":  "json",
+                                         "jsonBody":  "={\n  \"ticket_id\": \"{{$json.ticket_id}}\",\n  \"conversation_message_id\": \"{{$json.conversation_message_id}}\",\n  \"sender_type\": \"{{$json.sender_type}}\",\n  \"file_name\": \"{{$json.file_name}}\",\n  \"file_path\": {{$json.file_path ? '\"' + $json.file_path + '\"' : null}},\n  \"public_url\": {{$json.public_url ? '\"' + $json.public_url + '\"' : null}},\n  \"mime_type\": {{$json.mime_type ? '\"' + $json.mime_type + '\"' : null}},\n  \"file_size\": {{$json.file_size ?? null}},\n  \"source\": \"{{$json.source}}\"\n}",
+                                         "options":  {
+
+                                                     }
+                                     },
+                      "type":  "n8n-nodes-base.httpRequest",
+                      "typeVersion":  4.4,
+                      "position":  [
+                                       1280,
+                                       224
+                                   ],
+                      "id":  "7fc9e070-b013-4378-9548-2c56da7a0a44",
+                      "name":  "Insert Reply Attachment Metadata",
                       "continueOnFail":  true
                   }
               ],
@@ -451,12 +506,28 @@
                                                       "main":  [
                                                                    [
                                                                        {
+                                                                           "node":  "Build Reply Attachment Rows",
+                                                                           "type":  "main",
+                                                                           "index":  0
+                                                                       },
+                                                                       {
                                                                            "node":  "Update Ticket To Needs Attention",
                                                                            "type":  "main",
                                                                            "index":  0
                                                                        }
                                                                    ]
                                                                ]
+                                                 },
+                        "Build Reply Attachment Rows":  {
+                                                             "main":  [
+                                                                          [
+                                                                              {
+                                                                                  "node":  "Insert Reply Attachment Metadata",
+                                                                                  "type":  "main",
+                                                                                  "index":  0
+                                                                              }
+                                                                          ]
+                                                                      ]
                                                  }
                     },
     "active":  true,

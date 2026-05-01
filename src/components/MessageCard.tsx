@@ -33,11 +33,11 @@ const MessageCard: FC<MessageCardProps> = ({ message, onClick, onDelete, isDelet
     <motion.div 
       whileHover={{ y: -4, scale: 1.01 }}
       onClick={() => onClick(message)}
-      className="glass-morphism p-5 rounded-xl cursor-pointer hover:border-primary/40 transition-all group"
+      className="p-5 rounded-2xl cursor-pointer border border-border/90 bg-gradient-to-b from-bg-card/60 to-bg-card/25 hover:border-primary/35 hover:shadow-[0_10px_35px_rgba(124,58,237,0.15)] transition-all group"
     >
       <div className="flex justify-between items-start mb-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">
+          <div className="w-10 h-10 rounded-full bg-primary/15 flex items-center justify-center text-primary font-bold ring-1 ring-primary/20">
             {message.firstName[0]}{message.lastName[0]}
           </div>
           <div>
@@ -66,7 +66,7 @@ const MessageCard: FC<MessageCardProps> = ({ message, onClick, onDelete, isDelet
         {message.message}
       </p>
 
-      <div className="flex justify-between items-center pt-4 border-t border-border mt-auto">
+      <div className="flex justify-between items-center pt-4 border-t border-border/80 mt-auto">
         <div className="flex items-center gap-2">
           <span className="badge bg-primary/10 text-primary">
             {message.category}

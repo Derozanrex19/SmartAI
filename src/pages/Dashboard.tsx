@@ -6,6 +6,7 @@ import {
   Sparkles,
   Send,
   Loader2,
+  RefreshCw,
   MessageSquare,
   Mail,
   Clock,
@@ -122,6 +123,10 @@ interface AiWebhookResponse {
   final_response?: string | null;
   email_error?: string | null;
   ai_error?: string | null;
+}
+
+interface AiGenerationContext {
+  customerReply: string | null;
 }
 
 const VALID_CATEGORIES = ['technical', 'billing', 'feedback', 'other'] as const;
@@ -336,6 +341,7 @@ export default function Dashboard() {
   const [messageAttachments, setMessageAttachments] = useState<UiMessageAttachment[]>([]);
   const [isLoadingConversation, setIsLoadingConversation] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -362,13 +368,15 @@ export default function Dashboard() {
   const emailJsTemplateId = import.meta.env.VITE_EMAILJS_TEMPLATE_ID as string | undefined;
   const emailJsPublicKey = import.meta.env.VITE_EMAILJS_PUBLIC_KEY as string | undefined;
 
-  const loadMessages = async () => {
-    setIsLoading(true);
+  const loadMessages = async (mode: 'initial' | 'refresh' | 'silent' = 'initial') => {
+    if (mode === 'initial') setIsLoading(true);
+    if (mode === 'refresh') setIsRefreshing(true);
     setLoadError('');
 
     const { data: authData } = await supabase.auth.getUser();
     if (!authData.user) {
       setIsLoading(false);
+      setIsRefreshing(false);
       navigate('/login');
       return;
     }
@@ -384,6 +392,7 @@ export default function Dashboard() {
       setLoadError(error.message || 'Unable to load messages.');
       setMessages([]);
       setIsLoading(false);
+      setIsRefreshing(false);
       return;
     }
 
@@ -413,6 +422,7 @@ export default function Dashboard() {
 
     setMessages(formatted);
     setIsLoading(false);
+    setIsRefreshing(false);
   };
 
   const buildFallbackConversation = (message: UiMessage): UiConversationMessage[] => {
@@ -494,7 +504,7 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
-    loadMessages();
+    void loadMessages('initial');
   }, []);
 
   useEffect(() => {
@@ -615,7 +625,7 @@ export default function Dashboard() {
     navigate('/login');
   };
 
-  const runAiGeneration = async (message: UiMessage, trigger: 'auto' | 'manual') => {
+  const runAiGeneration = async (message: UiMessage, trigger: 'auto' | 'manual', context?: AiGenerationContext) => {
     if (inFlightGenerationRef.current.has(message.id)) return;
     setModalError('');
     if (!n8nWebhookUrl) {
@@ -632,6 +642,9 @@ export default function Dashboard() {
     setIsGenerating(true);
     setGeneratingTicketId(message.id);
 
+    const latestCustomerReply = (context?.customerReply || '').trim();
+    const generationInputMessage = latestCustomerReply || message.message;
+
     const payload = {
       ticketId: message.id,
       firstName: message.firstName,
@@ -639,7 +652,9 @@ export default function Dashboard() {
       email: message.email,
       category: 'unspecified',
       priority: 'unspecified',
-      message: message.message
+      message: generationInputMessage,
+      latestCustomerReply: latestCustomerReply || null,
+      originalMessage: message.message
     };
 
     try {
@@ -692,11 +707,11 @@ export default function Dashboard() {
         window.clearTimeout(timeoutId);
       }
 
-      const sentiment = normalizeSentiment(aiData.sentiment, message.message);
-      const aiCategory = normalizeCategory(aiData.category, message.message);
+      const sentiment = normalizeSentiment(aiData.sentiment, generationInputMessage);
+      const aiCategory = normalizeCategory(aiData.category, generationInputMessage);
       const aiPriority = normalizePriority(aiData.priority);
       const resolvedPriority =
-        aiPriority ?? inferPriorityFromMessage(message.message, aiCategory, sentiment);
+        aiPriority ?? inferPriorityFromMessage(generationInputMessage, aiCategory, sentiment);
       const confidence = normalizeConfidence(aiData.confidence);
       const generatedDraft = (aiData.draft_response || aiData.final_response || '').trim();
       const resolvedDraft = generatedDraft || FALLBACK_DRAFT;
@@ -771,7 +786,7 @@ export default function Dashboard() {
         setModalError(`AI draft generated, but auto-send failed: ${aiData.email_error}`);
       }
 
-      await loadMessages();
+      await loadMessages('silent');
     } catch (error) {
       if (trigger === 'auto') {
         setModalError(error instanceof Error
@@ -789,7 +804,11 @@ export default function Dashboard() {
 
   const handleGenerateResponse = async () => {
     if (!selectedMessage) return;
-    await runAiGeneration(selectedMessage, 'manual');
+    const latestCustomerReply = [...conversationMessages]
+      .reverse()
+      .find((item) => item.senderType === 'customer' && item.body.trim())?.body || null;
+
+    await runAiGeneration(selectedMessage, 'manual', { customerReply: latestCustomerReply });
   };
 
   const handleSendResponse = async () => {
@@ -848,7 +867,7 @@ export default function Dashboard() {
       if (conversationError) throw new Error(conversationError.message || 'Unable to save reply in the conversation.');
 
       setStatus('sent');
-      await loadMessages();
+      await loadMessages('silent');
       await loadConversation({
         ...selectedMessage,
         status: 'replied',
@@ -916,7 +935,7 @@ export default function Dashboard() {
 
       if (error) throw new Error(error.message || 'Unable to delete replied ticket.');
 
-      await loadMessages();
+      await loadMessages('silent');
       if (selectedMessage?.id === message.id) {
         setSelectedMessage(null);
         setAiDraft('');
@@ -956,7 +975,7 @@ export default function Dashboard() {
           : current
       );
       setAiDraft('');
-      await loadMessages();
+      await loadMessages('silent');
     } catch (error) {
       setModalError(error instanceof Error ? error.message : 'Unable to close ticket.');
     } finally {
@@ -986,6 +1005,19 @@ export default function Dashboard() {
     }, {}),
     [messageAttachments]
   );
+  const latestCustomerConversationReply = useMemo(
+    () => [...conversationMessages].reverse().find((item) => item.senderType === 'customer' && item.body.trim()) || null,
+    [conversationMessages]
+  );
+  const generationContextLabel = latestCustomerConversationReply
+    ? `Latest customer reply (${new Date(latestCustomerConversationReply.createdAt).toLocaleString()})`
+    : 'Original ticket message';
+  const skeletonCards = Array.from({ length: 6 });
+
+  const handleRefreshMessages = async () => {
+    if (isRefreshing || isLoading) return;
+    await loadMessages('refresh');
+  };
 
   return (
     <div className="min-h-screen flex flex-col bg-bg-dark">
@@ -1054,17 +1086,30 @@ export default function Dashboard() {
         </aside>
 
         <section className="lg:col-span-9">
-          <div className="flex flex-wrap gap-4 justify-between items-center mb-6">
-            <h2 className="text-2xl font-bold">Customer Messages</h2>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
-              <input
-                type="text"
-                placeholder="Search tickets..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10 pr-4 py-2 text-sm w-72 bg-bg-card border-border"
-              />
+          <div className="flex flex-wrap gap-3 justify-between items-center mb-6">
+            <div>
+              <h2 className="text-2xl font-bold">Customer Messages</h2>
+              <p className="text-xs text-text-muted mt-1">Refresh new tickets without browser reload.</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleRefreshMessages}
+                disabled={isRefreshing || isLoading}
+                className="px-3 py-2 rounded-lg border border-border text-xs font-semibold uppercase tracking-wider flex items-center gap-2 hover:bg-bg-card disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+                {isRefreshing ? 'Refreshing...' : 'Refresh'}
+              </button>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
+                <input
+                  type="text"
+                  placeholder="Search tickets..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10 pr-4 py-2 text-sm w-72 bg-bg-card border-border"
+                />
+              </div>
             </div>
           </div>
 
@@ -1080,7 +1125,22 @@ export default function Dashboard() {
                   <h3 className="text-lg font-semibold">Needs Attention</h3>
                   <span className="text-xs text-text-muted">{pendingMessages.length} ticket(s)</span>
                 </div>
-                {pendingMessages.length === 0 ? (
+                {isRefreshing ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {skeletonCards.map((_, idx) => (
+                      <div key={`pending-skeleton-${idx}`} className="rounded-xl border border-border bg-bg-card/25 p-5">
+                        <div className="skeleton-shimmer h-4 w-2/5 rounded mb-4" />
+                        <div className="skeleton-shimmer h-3 w-3/4 rounded mb-2" />
+                        <div className="skeleton-shimmer h-3 w-full rounded mb-2" />
+                        <div className="skeleton-shimmer h-3 w-4/5 rounded mb-4" />
+                        <div className="flex justify-between">
+                          <div className="skeleton-shimmer h-6 w-20 rounded-full" />
+                          <div className="skeleton-shimmer h-4 w-16 rounded" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : pendingMessages.length === 0 ? (
                   <p className="text-sm text-text-muted border border-border rounded-xl px-4 py-3 bg-bg-card/30">No tickets need attention.</p>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1089,7 +1149,7 @@ export default function Dashboard() {
                     ))}
                   </div>
                 )}
-                {pendingMessages.length > PAGE_SIZE && (
+                {pendingMessages.length > PAGE_SIZE && !isRefreshing && (
                   <div className="mt-4 flex items-center justify-end gap-2 text-xs text-text-muted">
                     <button
                       onClick={() => setPendingPage((current) => Math.max(1, current - 1))}
@@ -1118,7 +1178,22 @@ export default function Dashboard() {
                   <h3 className="text-lg font-semibold">Replied</h3>
                   <span className="text-xs text-text-muted">{repliedMessages.length} ticket(s)</span>
                 </div>
-                {repliedMessages.length === 0 ? (
+                {isRefreshing ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {skeletonCards.map((_, idx) => (
+                      <div key={`replied-skeleton-${idx}`} className="rounded-xl border border-border bg-bg-card/25 p-5">
+                        <div className="skeleton-shimmer h-4 w-2/5 rounded mb-4" />
+                        <div className="skeleton-shimmer h-3 w-3/4 rounded mb-2" />
+                        <div className="skeleton-shimmer h-3 w-full rounded mb-2" />
+                        <div className="skeleton-shimmer h-3 w-4/5 rounded mb-4" />
+                        <div className="flex justify-between">
+                          <div className="skeleton-shimmer h-6 w-20 rounded-full" />
+                          <div className="skeleton-shimmer h-4 w-16 rounded" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : repliedMessages.length === 0 ? (
                   <p className="text-sm text-text-muted border border-border rounded-xl px-4 py-3 bg-bg-card/30">No replied tickets yet.</p>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1131,7 +1206,7 @@ export default function Dashboard() {
                     ))}
                   </div>
                 )}
-                {repliedMessages.length > PAGE_SIZE && (
+                {repliedMessages.length > PAGE_SIZE && !isRefreshing && (
                   <div className="mt-4 flex items-center justify-end gap-2 text-xs text-text-muted">
                     <button
                       onClick={() => setRepliedPage((current) => Math.max(1, current - 1))}
@@ -1160,7 +1235,22 @@ export default function Dashboard() {
                   <h3 className="text-lg font-semibold">Closed</h3>
                   <span className="text-xs text-text-muted">{closedMessages.length} ticket(s)</span>
                 </div>
-                {closedMessages.length === 0 ? (
+                {isRefreshing ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {skeletonCards.map((_, idx) => (
+                      <div key={`closed-skeleton-${idx}`} className="rounded-xl border border-border bg-bg-card/25 p-5">
+                        <div className="skeleton-shimmer h-4 w-2/5 rounded mb-4" />
+                        <div className="skeleton-shimmer h-3 w-3/4 rounded mb-2" />
+                        <div className="skeleton-shimmer h-3 w-full rounded mb-2" />
+                        <div className="skeleton-shimmer h-3 w-4/5 rounded mb-4" />
+                        <div className="flex justify-between">
+                          <div className="skeleton-shimmer h-6 w-20 rounded-full" />
+                          <div className="skeleton-shimmer h-4 w-16 rounded" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : closedMessages.length === 0 ? (
                   <p className="text-sm text-text-muted border border-border rounded-xl px-4 py-3 bg-bg-card/30">No closed tickets yet.</p>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1173,7 +1263,7 @@ export default function Dashboard() {
                     ))}
                   </div>
                 )}
-                {closedMessages.length > PAGE_SIZE && (
+                {closedMessages.length > PAGE_SIZE && !isRefreshing && (
                   <div className="mt-4 flex items-center justify-end gap-2 text-xs text-text-muted">
                     <button
                       onClick={() => setClosedPage((current) => Math.max(1, current - 1))}
@@ -1390,6 +1480,12 @@ export default function Dashboard() {
                   />
 
                   <div className="mt-5 pt-5 border-t border-border space-y-3">
+                    <div className="text-xs bg-bg-card/40 border border-border rounded-lg px-3 py-2">
+                      <p className="font-semibold text-text-light">{generationContextLabel}</p>
+                      <p className="text-text-muted mt-1 whitespace-pre-wrap">
+                        {(latestCustomerConversationReply?.body || selectedMessage.message).slice(0, 220)}
+                      </p>
+                    </div>
                     <button
                       onClick={handleSendResponse}
                       disabled={selectedMessage.status === 'closed' || !aiDraft || status !== 'idle' || isSending}

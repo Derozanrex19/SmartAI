@@ -528,6 +528,32 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
+    const channel = supabase
+      .channel('supportiq-dashboard-live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
+        void loadMessages('silent');
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conversation_messages' }, (payload) => {
+        void loadMessages('silent');
+        const row = payload.new as { ticket_id?: string } | null;
+        if (selectedMessage && row?.ticket_id === selectedMessage.id) {
+          void loadConversation(selectedMessage);
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_attachments' }, (payload) => {
+        const row = payload.new as { ticket_id?: string } | null;
+        if (selectedMessage && row?.ticket_id === selectedMessage.id) {
+          void loadConversation(selectedMessage);
+        }
+      })
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [selectedMessage]);
+
+  useEffect(() => {
     const timerId = window.setInterval(() => {
       setCooldownTick(Date.now());
     }, 1000);
@@ -855,6 +881,7 @@ export default function Dashboard() {
 
     try {
       const ticketSubject = `[SupportIQ ${selectedMessage.id}] Response to your concern`;
+      const replyLink = `${window.location.origin}/reply/${selectedMessage.id}`;
       await emailjs.send(
         emailJsServiceId,
         emailJsTemplateId,
@@ -867,7 +894,8 @@ export default function Dashboard() {
           ai_category: selectedMessage.aiCategory || 'other',
           sentiment: selectedMessage.sentiment || 'neutral',
           response_message: aiDraft,
-          reply_instructions: `Reply to this email and keep ${selectedMessage.id} in the subject so SupportIQ can attach your response to the same ticket.`
+          reply_link: replyLink,
+          reply_instructions: `Continue the conversation here: ${replyLink}`
         },
         { publicKey: emailJsPublicKey }
       );

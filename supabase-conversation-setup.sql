@@ -31,6 +31,44 @@ create table if not exists public.message_attachments (
 create index if not exists message_attachments_ticket_id_created_at_idx
   on public.message_attachments (ticket_id, created_at);
 
+create or replace function public.submit_customer_reply(
+  ticket_id_input text,
+  sender_email_input text,
+  body_input text
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  created_message_id uuid;
+begin
+  insert into public.conversation_messages (
+    ticket_id,
+    sender_type,
+    sender_email,
+    body
+  )
+  values (
+    ticket_id_input,
+    'customer',
+    nullif(trim(sender_email_input), ''),
+    trim(body_input)
+  )
+  returning id into created_message_id;
+
+  update public.messages
+  set status = 'needs_attention'
+  where ticket_id = ticket_id_input
+    and coalesce(status::text, '') <> 'closed';
+
+  return created_message_id;
+end;
+$$;
+
+grant execute on function public.submit_customer_reply(text, text, text) to anon, authenticated;
+
 insert into storage.buckets (id, name, public)
 values ('supportiq-attachments', 'supportiq-attachments', true)
 on conflict (id) do nothing;

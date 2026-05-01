@@ -37,12 +37,16 @@ Run `supabase-conversation-setup.sql` in Supabase to add `conversation_messages`
 
 Thread flow:
 1. Customer submits `/contact-us` -> app creates a ticket and the first `conversation_messages` row.
-2. Admin sends a reply -> EmailJS sends the email, app saves an admin conversation row, and status becomes `replied`.
-3. Customer replies to email -> n8n Email Trigger (IMAP/Gmail) extracts the ticket ID from the subject, inserts a customer conversation row, and updates status to `needs_attention`.
-4. Admin clicks `Close Ticket` once resolved -> status becomes `closed`.
+2. Admin sends a reply -> EmailJS sends the email with a `/reply/{{ticket_id}}` link, app saves an admin conversation row, and status becomes `replied`.
+3. Customer clicks the reply link -> app inserts a customer conversation row directly in Supabase and updates status to `needs_attention`.
+4. Optional email fallback -> n8n Email Trigger (IMAP/Gmail) can still extract the ticket ID from the subject, insert a customer conversation row, and update status to `needs_attention`.
+5. Admin clicks `Close Ticket` once resolved -> status becomes `closed`.
 
 Outgoing EmailJS templates should include the ticket ID in the subject, for example:
 `[SupportIQ {{ticket_id}}] Response to your concern`
+
+Templates should also include the in-app reply link:
+`{{reply_link}}`
 
 ## Policy Routing Rules (n8n)
 Routing decision after parse/validation:

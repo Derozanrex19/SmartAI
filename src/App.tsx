@@ -7,6 +7,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import ContactUs from './pages/ContactUs';
 import AboutUs from './pages/AboutUs';
+import ReplyPage from './pages/ReplyPage';
 import { supabase } from './lib/supabase';
 
 function ProtectedRoute({ session, children }: { session: Session | null; children: JSX.Element }) {
@@ -57,6 +58,7 @@ export default function App() {
         <Route path="/" element={<Home />} />
         <Route path="/contact-us" element={<ContactUs />} />
         <Route path="/about-us" element={<AboutUs />} />
+        <Route path="/reply/:ticketId" element={<ReplyPage />} />
         <Route path="/login" element={session ? <Navigate to="/dashboard" replace /> : <Login />} />
         <Route
           path="/dashboard"

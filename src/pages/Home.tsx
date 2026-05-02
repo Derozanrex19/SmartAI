@@ -47,7 +47,7 @@ export default function Home() {
             </p>
             <div className="flex flex-wrap gap-3">
               <Link to="/contact-us" className="btn-primary py-2.5 px-5 text-sm inline-flex items-center gap-2">
-                Try Intake Flow <ArrowRight className="w-4 h-4" />
+                Try SmartIQ <ArrowRight className="w-4 h-4" />
               </Link>
               <Link to="/about-us" className="btn-secondary py-2.5 px-5 text-sm">
                 See Product Story
@@ -170,9 +170,6 @@ export default function Home() {
             <div className="mt-5 flex flex-wrap gap-3">
               <Link to="/contact-us" className="btn-primary py-2.5 px-5 text-sm">
                 Open Contact Flow
-              </Link>
-              <Link to="/login" className="btn-secondary py-2.5 px-5 text-sm">
-                Go to Admin Dashboard
               </Link>
             </div>
           </motion.div>

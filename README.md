@@ -47,6 +47,8 @@ Outgoing EmailJS templates should include the ticket ID in the subject, for exam
 
 Templates should also include the in-app reply link:
 `{{reply_link}}`
+Use an HTML anchor/button for mobile email clients:
+`<a href="{{reply_link}}" target="_blank" rel="noopener noreferrer">Reply to this ticket</a>`
 
 ## Policy Routing Rules (n8n)
 Routing decision after parse/validation:
@@ -71,6 +73,7 @@ Safety guardrails:
 - `VITE_EMAILJS_SERVICE_ID`
 - `VITE_EMAILJS_TEMPLATE_ID`
 - `VITE_EMAILJS_PUBLIC_KEY`
+- `VITE_PUBLIC_APP_URL` (recommended for stable production reply links)
 
 ### n8n runtime secrets (for auto-send branch)
 - `EMAILJS_SERVICE_ID`

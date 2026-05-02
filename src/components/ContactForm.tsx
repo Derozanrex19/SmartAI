@@ -112,6 +112,10 @@ export default function ContactForm({ onSubmit }: ContactFormProps) {
   const [submitWarning, setSubmitWarning] = useState('');
   const [attachments, setAttachments] = useState<UploadableAttachment[]>([]);
   const n8nWebhookUrl = import.meta.env.VITE_N8N_WEBHOOK_URL as string | undefined;
+  const appBaseUrl = (
+    (import.meta.env.VITE_PUBLIC_APP_URL as string | undefined) ||
+    window.location.origin
+  ).replace(/\/+$/, '');
 
   const generateTicketId = () => {
     const now = new Date();
@@ -287,6 +291,7 @@ export default function ContactForm({ onSubmit }: ContactFormProps) {
     if (n8nWebhookUrl) {
       try {
         const webhookPayload = {
+          ticket_id: generatedTicketId,
           ticketId: generatedTicketId,
           firstName: formData.firstName.trim(),
           lastName: formData.lastName.trim(),
@@ -294,6 +299,11 @@ export default function ContactForm({ onSubmit }: ContactFormProps) {
           category: 'unspecified',
           priority: 'unspecified',
           message: formData.message.trim(),
+          subject: `[SupportIQ ${generatedTicketId}] Response to your concern`,
+          emailSubject: `[SupportIQ ${generatedTicketId}] Response to your concern`,
+          replyLink: `${appBaseUrl}/reply/${generatedTicketId}?email=${encodeURIComponent(formData.email.trim().toLowerCase())}`,
+          reply_link: `${appBaseUrl}/reply/${generatedTicketId}?email=${encodeURIComponent(formData.email.trim().toLowerCase())}`,
+          replyInstructions: `Continue the conversation here: ${appBaseUrl}/reply/${generatedTicketId}?email=${encodeURIComponent(formData.email.trim().toLowerCase())}`,
           attachments: (uploadedAttachments || []).map((attachment) => ({
             fileName: attachment.file_name,
             publicUrl: attachment.public_url,

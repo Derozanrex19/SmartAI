@@ -106,7 +106,7 @@ export default function Home() {
               },
               {
                 icon: Bot,
-                title: '2. Assist, don’t autopilot',
+                title: "2. Assist, don't autopilot",
                 text: 'AI categorizes sentiment and urgency, then prepares a draft your team can approve or refine.'
               },
               {
@@ -185,3 +185,4 @@ export default function Home() {
     </div>
   );
 }
+

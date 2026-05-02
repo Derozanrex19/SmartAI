@@ -137,6 +137,13 @@ interface AiAttachmentInput {
   source: 'upload' | 'email';
 }
 
+interface ConfirmDialogState {
+  title: string;
+  message: string;
+  intent: 'danger' | 'default';
+  onConfirm: () => Promise<void>;
+}
+
 const VALID_CATEGORIES = ['technical', 'billing', 'feedback', 'other'] as const;
 const VALID_SENTIMENTS = ['frustrated', 'neutral', 'happy'] as const;
 const VALID_PRIORITIES = ['low', 'medium', 'high'] as const;
@@ -376,6 +383,8 @@ export default function Dashboard() {
   const [closedPage, setClosedPage] = useState(initialClosedPage);
   const [deletingTicketId, setDeletingTicketId] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
+  const [isConfirming, setIsConfirming] = useState(false);
   const inFlightGenerationRef = useRef<Set<string>>(new Set());
   const generationCooldownRef = useRef<Map<string, number>>(new Map());
   const previousSearchRef = useRef(searchTerm);
@@ -976,68 +985,83 @@ export default function Dashboard() {
 
   const handleDeleteRepliedMessage = async (message: UiMessage) => {
     if (!message.replied) return;
+    setConfirmDialog({
+      title: `Delete ticket ${message.id}?`,
+      message: 'This action cannot be undone.',
+      intent: 'danger',
+      onConfirm: async () => {
+        setModalError('');
+        setDeletingTicketId(message.id);
 
-    const shouldDelete = window.confirm(
-      `Delete replied ticket ${message.id}? This cannot be undone.`
-    );
-    if (!shouldDelete) return;
+        try {
+          const { error } = await supabase
+            .from('messages')
+            .delete()
+            .eq('ticket_id', message.id);
 
-    setModalError('');
-    setDeletingTicketId(message.id);
+          if (error) throw new Error(error.message || 'Unable to delete replied ticket.');
 
-    try {
-      const { error } = await supabase
-        .from('messages')
-        .delete()
-        .eq('ticket_id', message.id);
-
-      if (error) throw new Error(error.message || 'Unable to delete replied ticket.');
-
-      await loadMessages('silent');
-      if (selectedMessage?.id === message.id) {
-        setSelectedMessage(null);
-        setAiDraft('');
+          await loadMessages('silent');
+          if (selectedMessage?.id === message.id) {
+            setSelectedMessage(null);
+            setAiDraft('');
+          }
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Unable to delete replied ticket.';
+          if (selectedMessage?.id === message.id) {
+            setModalError(errorMessage);
+          } else {
+            setLoadError(errorMessage);
+          }
+        } finally {
+          setDeletingTicketId(null);
+        }
       }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unable to delete replied ticket.';
-      if (selectedMessage?.id === message.id) {
-        setModalError(errorMessage);
-      } else {
-        setLoadError(errorMessage);
-      }
-    } finally {
-      setDeletingTicketId(null);
-    }
+    });
   };
 
   const handleCloseTicket = async () => {
     if (!selectedMessage || selectedMessage.status === 'closed') return;
+    setConfirmDialog({
+      title: `Close ticket ${selectedMessage.id}?`,
+      message: 'You can still view this ticket in the Closed queue.',
+      intent: 'default',
+      onConfirm: async () => {
+        setModalError('');
+        setIsClosingTicket(true);
 
-    const shouldClose = window.confirm(`Close ticket ${selectedMessage.id}? You can still view it in Closed.`);
-    if (!shouldClose) return;
+        try {
+          const { error } = await supabase
+            .from('messages')
+            .update({ status: 'closed' })
+            .eq('ticket_id', selectedMessage.id);
 
-    setModalError('');
-    setIsClosingTicket(true);
+          if (error) throw new Error(error.message || 'Unable to close ticket.');
 
+          setSelectedMessage((current) =>
+            current && current.id === selectedMessage.id
+              ? { ...current, status: 'closed', replied: false }
+              : current
+          );
+          setAiDraft('');
+          await loadMessages('silent');
+        } catch (error) {
+          setModalError(error instanceof Error ? error.message : 'Unable to close ticket.');
+        } finally {
+          setIsClosingTicket(false);
+        }
+      }
+    });
+  };
+
+  const handleConfirmDialogAction = async () => {
+    if (!confirmDialog || isConfirming) return;
+    setIsConfirming(true);
     try {
-      const { error } = await supabase
-        .from('messages')
-        .update({ status: 'closed' })
-        .eq('ticket_id', selectedMessage.id);
-
-      if (error) throw new Error(error.message || 'Unable to close ticket.');
-
-      setSelectedMessage((current) =>
-        current && current.id === selectedMessage.id
-          ? { ...current, status: 'closed', replied: false }
-          : current
-      );
-      setAiDraft('');
-      await loadMessages('silent');
-    } catch (error) {
-      setModalError(error instanceof Error ? error.message : 'Unable to close ticket.');
+      await confirmDialog.onConfirm();
+      setConfirmDialog(null);
     } finally {
-      setIsClosingTicket(false);
+      setIsConfirming(false);
     }
   };
 
@@ -1165,7 +1189,7 @@ export default function Dashboard() {
                   placeholder="Search tickets..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10 pr-4 py-2 text-sm w-72 bg-bg-card border-border"
+                  className="pl-10 pr-4 py-2 text-sm w-full max-w-[18rem] sm:w-72 bg-bg-card border-border"
                 />
               </div>
             </div>
@@ -1560,6 +1584,47 @@ export default function Dashboard() {
                     )}
                   </div>
                 </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {confirmDialog && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] bg-bg-dark/85 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.96, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.96, opacity: 0, y: 10 }}
+              className="w-full max-w-md rounded-2xl border border-border bg-bg-card p-5"
+            >
+              <h3 className="text-lg font-semibold">{confirmDialog.title}</h3>
+              <p className="text-sm text-text-muted mt-2">{confirmDialog.message}</p>
+              <div className="mt-5 flex justify-end gap-2">
+                <button
+                  onClick={() => setConfirmDialog(null)}
+                  disabled={isConfirming}
+                  className="px-3 py-2 rounded-lg border border-border text-sm hover:bg-bg-dark disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmDialogAction}
+                  disabled={isConfirming}
+                  className={`px-3 py-2 rounded-lg text-sm font-semibold ${
+                    confirmDialog.intent === 'danger'
+                      ? 'bg-error text-white hover:brightness-110'
+                      : 'bg-primary text-white hover:brightness-110'
+                  } disabled:opacity-60`}
+                >
+                  {isConfirming ? 'Please wait...' : 'Confirm'}
+                </button>
               </div>
             </motion.div>
           </motion.div>

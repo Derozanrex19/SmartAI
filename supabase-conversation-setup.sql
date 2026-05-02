@@ -1,6 +1,40 @@
 -- Run this in the Supabase SQL editor before demoing threaded replies.
 -- The existing messages table remains the ticket table.
 
+-- Ensure the base tickets table allows public customer submissions.
+alter table public.messages enable row level security;
+
+drop policy if exists "Customers can create tickets" on public.messages;
+create policy "Customers can create tickets"
+  on public.messages
+  for insert
+  to anon, authenticated
+  with check (
+    coalesce(status::text, '') in ('new', 'needs_attention')
+  );
+
+drop policy if exists "Admins can manage tickets" on public.messages;
+create policy "Admins can manage tickets"
+  on public.messages
+  for all
+  to authenticated
+  using (
+    exists (
+      select 1
+      from public.admin_profiles
+      where admin_profiles.user_id = auth.uid()
+        and admin_profiles.is_active = true
+    )
+  )
+  with check (
+    exists (
+      select 1
+      from public.admin_profiles
+      where admin_profiles.user_id = auth.uid()
+        and admin_profiles.is_active = true
+    )
+  );
+
 create table if not exists public.conversation_messages (
   id uuid primary key default gen_random_uuid(),
   ticket_id text not null references public.messages(ticket_id) on delete cascade,
